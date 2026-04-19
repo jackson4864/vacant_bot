@@ -84,7 +84,9 @@ async def persist_response(message: Message, state: FSMContext, phone: str) -> N
 
 
 @dp.message(CommandStart())
-async def start_handler(message: Message) -> None:
+@dp.message(Command("start"))
+async def start_handler(message: Message, state: FSMContext) -> None:
+    await state.clear()
     await message.answer(
         "Привет!\n\n"
         f"Я найду вакансии рядом с вами в радиусе {SEARCH_RADIUS_KM} км.\n"
