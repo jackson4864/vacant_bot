@@ -39,8 +39,6 @@ async def help_handler(message: Message) -> None:
 
 @dp.message(F.location)
 async def location_handler(message: Message) -> None:
-    print("LAT:", message.location.latitude)
-    print("LON:", message.location.longitude)
     user_lat = message.location.latitude
     user_lon = message.location.longitude
 
@@ -51,28 +49,47 @@ async def location_handler(message: Message) -> None:
     )
 
     if not vacancies:
-        await message.answer(
-            "Рядом с вами не найдено вакансий в радиусе 5 км."
-        )
+        await message.answer("Вакансии не найдены.")
         return
 
-    await message.answer(
-        f"Нашел вакансии рядом с вами в радиусе {SEARCH_RADIUS_KM} км:"
-    )
+    nearby = [v for v in vacancies if v["in_radius"]]
 
-    for vacancy in vacancies:
-        text = (
-            f"<b>{vacancy['title']}</b>\n"
-            f"{vacancy['description']}\n"
-            f"📍 {vacancy['address']}\n"
-            f"📏 Расстояние: {vacancy['distance']} км"
+    # если в радиусе меньше 5, добираем ближайшими
+    if len(nearby) >= 5:
+        result_vacancies = nearby[:5]
+        header = f"Нашел 5 ближайших вакансий в радиусе {SEARCH_RADIUS_KM} км:"
+    else:
+        result_vacancies = vacancies[:5]
+        header = (
+            f"В радиусе {SEARCH_RADIUS_KM} км найдено только {len(nearby)} вакансий.\n"
+            f"Показываю 5 ближайших вариантов:"
         )
+
+    await message.answer(header)
+
+    for vacancy in result_vacancies:
+        text = f"<b>{vacancy['title']}</b>\n"
+
+        if vacancy.get("description"):
+            text += f"{vacancy['description']}\n"
+
+        if vacancy.get("description_2"):
+            text += f"{vacancy['description_2']}\n"
+
+        if vacancy.get("payment"):
+            text += f"💰 {vacancy['payment']}\n"
+
+        text += f"📍 {vacancy['address']}\n"
+        text += f"📏 Расстояние: {vacancy['distance']} км\n"
+
+        if vacancy.get("maps"):
+            text += f"🗺 <a href=\"{vacancy['maps']}\">Открыть на карте</a>\n"
 
         await message.answer(
             text,
-            reply_markup=respond_keyboard(vacancy["id"])
+            reply_markup=respond_keyboard(vacancy["id"]),
+            disable_web_page_preview=True
         )
-
 
 @dp.callback_query(F.data.startswith("respond:"))
 async def respond_callback_handler(callback: CallbackQuery, state: FSMContext) -> None:
