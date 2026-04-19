@@ -43,12 +43,11 @@ async def location_handler(message: Message) -> None:
     user_lon = message.location.longitude
 
     vacancies = find_nearby_vacancies(
-        print(vacancies)
         user_lat=user_lat,
         user_lon=user_lon,
         radius_km=SEARCH_RADIUS_KM
     )
-
+    print(vacancies)
     if not vacancies:
         await message.answer("Вакансии не найдены.")
         return
