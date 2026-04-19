@@ -53,14 +53,14 @@ async def location_handler(message: Message) -> None:
 
     if not nearby:
         await message.answer(
-            f"Нашел {len(result_vacancies)} вакансий в радиусе {SEARCH_RADIUS_KM} км:"
+            f"Рядом нет вакансий в радиусе {SEARCH_RADIUS_KM} км."
         )
         return
 
     result_vacancies = nearby[:5]
 
     await message.answer(
-        f"Нашел {len(result_vacancies)} ближайших вакансий в радиусе {SEARCH_RADIUS_KM} км:"
+        f"Нашел {len(result_vacancies)} вакансий в радиусе {SEARCH_RADIUS_KM} км:"
     )
 
     for vacancy in result_vacancies:
@@ -86,7 +86,6 @@ async def location_handler(message: Message) -> None:
             reply_markup=respond_keyboard(vacancy["id"]),
             disable_web_page_preview=True
         )
-
 @dp.callback_query(F.data.startswith("respond:"))
 async def respond_callback_handler(callback: CallbackQuery, state: FSMContext) -> None:
     vacancy_id = int(callback.data.split(":")[1])
