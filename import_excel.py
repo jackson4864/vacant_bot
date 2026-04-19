@@ -8,7 +8,7 @@ from config import BASE_DIR, DB_NAME
 from db import create_tables
 
 EXCEL_FILE = os.path.join(BASE_DIR, "vacancies.xlsx")
-REQUIRED_COLUMNS = {"title", "address", "latitude", "longitude"}
+REQUIRED_COLUMNS = {"region", "city", "title", "address", "latitude", "longitude"}
 
 
 def _clean_value(value: Any) -> Any:
@@ -38,6 +38,7 @@ def import_vacancies() -> None:
     with sqlite3.connect(DB_NAME) as conn:
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("UPDATE vacancies SET is_active = 0")
 
         for _, row in df.iterrows():
             latitude = float(row["latitude"])
@@ -47,6 +48,8 @@ def import_vacancies() -> None:
 
             data = {
                 "project": _clean_value(row.get("project")),
+                "region": str(row["region"]).strip(),
+                "city": str(row["city"]).strip(),
                 "title": title,
                 "description": _clean_value(row.get("description")),
                 "description_2": _clean_value(row.get("description_2")),
@@ -73,14 +76,19 @@ def import_vacancies() -> None:
                     """
                     UPDATE vacancies
                     SET project = ?,
+                        region = ?,
+                        city = ?,
                         description = ?,
                         description_2 = ?,
                         maps = ?,
-                        payment = ?
+                        payment = ?,
+                        is_active = 1
                     WHERE id = ?
                     """,
                     (
                         data["project"],
+                        data["region"],
+                        data["city"],
                         data["description"],
                         data["description_2"],
                         data["maps"],
@@ -94,6 +102,8 @@ def import_vacancies() -> None:
                     """
                     INSERT INTO vacancies (
                         project,
+                        region,
+                        city,
                         title,
                         description,
                         description_2,
@@ -101,12 +111,15 @@ def import_vacancies() -> None:
                         maps,
                         payment,
                         latitude,
-                        longitude
+                        longitude,
+                        is_active
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
                     """,
                     (
                         data["project"],
+                        data["region"],
+                        data["city"],
                         data["title"],
                         data["description"],
                         data["description_2"],

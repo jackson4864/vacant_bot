@@ -37,6 +37,8 @@ def create_tables() -> None:
         CREATE TABLE IF NOT EXISTS vacancies (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             project TEXT,
+            region TEXT,
+            city TEXT,
             title TEXT NOT NULL,
             description TEXT,
             description_2 TEXT,
@@ -44,9 +46,19 @@ def create_tables() -> None:
             maps TEXT,
             payment TEXT,
             latitude REAL NOT NULL,
-            longitude REAL NOT NULL
+            longitude REAL NOT NULL,
+            is_active INTEGER DEFAULT 1
         )
         """)
+
+        _add_column_if_missing(conn, "vacancies", "project", "TEXT")
+        _add_column_if_missing(conn, "vacancies", "region", "TEXT")
+        _add_column_if_missing(conn, "vacancies", "city", "TEXT")
+        _add_column_if_missing(conn, "vacancies", "description", "TEXT")
+        _add_column_if_missing(conn, "vacancies", "description_2", "TEXT")
+        _add_column_if_missing(conn, "vacancies", "maps", "TEXT")
+        _add_column_if_missing(conn, "vacancies", "payment", "TEXT")
+        _add_column_if_missing(conn, "vacancies", "is_active", "INTEGER DEFAULT 1")
 
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS responses (
@@ -66,6 +78,10 @@ def create_tables() -> None:
         _add_column_if_missing(conn, "responses", "username", "TEXT")
         _add_column_if_missing(conn, "responses", "chat_id", "INTEGER")
 
+        cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_vacancies_region_city
+        ON vacancies(region, city)
+        """)
         cursor.execute("""
         CREATE INDEX IF NOT EXISTS idx_vacancies_coordinates
         ON vacancies(latitude, longitude)
@@ -121,7 +137,7 @@ def seed_vacancies() -> None:
 
 def get_all_vacancies() -> List[Dict[str, Any]]:
     with closing(get_connection()) as conn:
-        rows = conn.execute("SELECT * FROM vacancies").fetchall()
+        rows = conn.execute("SELECT * FROM vacancies WHERE is_active = 1").fetchall()
     return [dict(row) for row in rows]
 
 
@@ -137,6 +153,7 @@ def get_vacancies_in_bounds(
             SELECT * FROM vacancies
             WHERE latitude BETWEEN ? AND ?
               AND longitude BETWEEN ? AND ?
+              AND is_active = 1
             """,
             (min_lat, max_lat, min_lon, max_lon),
         ).fetchall()
@@ -153,10 +170,55 @@ def get_vacancy_by_id(vacancy_id: int) -> Optional[Dict[str, Any]]:
     return dict(row) if row else None
 
 
+def get_regions() -> List[str]:
+    with closing(get_connection()) as conn:
+        rows = conn.execute(
+            """
+            SELECT DISTINCT region FROM vacancies
+            WHERE region IS NOT NULL AND TRIM(region) != ''
+              AND is_active = 1
+            ORDER BY region
+            """
+        ).fetchall()
+    return [row["region"] for row in rows]
+
+
+def get_cities_by_region(region: str) -> List[str]:
+    with closing(get_connection()) as conn:
+        rows = conn.execute(
+            """
+            SELECT DISTINCT city FROM vacancies
+            WHERE region = ?
+              AND city IS NOT NULL
+              AND TRIM(city) != ''
+              AND is_active = 1
+            ORDER BY city
+            """,
+            (region,),
+        ).fetchall()
+    return [row["city"] for row in rows]
+
+
+def get_vacancies_by_city(region: str, city: str) -> List[Dict[str, Any]]:
+    with closing(get_connection()) as conn:
+        rows = conn.execute(
+            """
+            SELECT * FROM vacancies
+            WHERE region = ? AND city = ?
+              AND is_active = 1
+            ORDER BY project, title, address
+            """,
+            (region, city),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
 RESPONSE_EXPORT_FIELDS = [
     "created_at",
     "full_name",
     "phone",
+    "vacancy_region",
+    "vacancy_city",
     "vacancy_title",
     "vacancy_address",
     "telegram_user_id",
@@ -177,6 +239,8 @@ def _response_export_rows(response_id: Optional[int] = None) -> List[Dict[str, A
             responses.username,
             responses.chat_id,
             vacancies.title AS vacancy_title,
+            vacancies.region AS vacancy_region,
+            vacancies.city AS vacancy_city,
             vacancies.address AS vacancy_address
         FROM responses
         LEFT JOIN vacancies ON vacancies.id = responses.vacancy_id

@@ -32,6 +32,10 @@ Import vacancies from `vacancies.xlsx`:
 python import_excel.py
 ```
 
+The import marks vacancies from the workbook as active. Old vacancies that are no
+longer present in the workbook stay in the database for response history, but are
+hidden from search and catalog.
+
 Export all saved responses to `responses.csv`:
 
 ```powershell
@@ -48,6 +52,8 @@ python bot.py
 
 `vacancies.xlsx` must contain these columns:
 
+- `region`
+- `city`
 - `title`
 - `address`
 - `latitude`
@@ -64,3 +70,8 @@ Optional columns:
 The bot stores vacancies and responses in local SQLite database `vacancies.db`.
 New responses are also appended to `responses.csv` so they can be opened in Excel.
 Do not commit `.env` or local database files to git.
+
+## Bot commands
+
+- `/start` - quick search by geolocation and main menu.
+- `/catalog` - choose region and city, then browse vacancies.
