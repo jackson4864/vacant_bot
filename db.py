@@ -1,8 +1,10 @@
+import csv
 import sqlite3
 from contextlib import closing
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from config import DB_NAME
+from config import DB_NAME, RESPONSES_EXPORT_FILE
 
 
 def get_connection() -> sqlite3.Connection:
@@ -151,6 +153,89 @@ def get_vacancy_by_id(vacancy_id: int) -> Optional[Dict[str, Any]]:
     return dict(row) if row else None
 
 
+RESPONSE_EXPORT_FIELDS = [
+    "created_at",
+    "full_name",
+    "phone",
+    "vacancy_title",
+    "vacancy_address",
+    "telegram_user_id",
+    "username",
+    "chat_id",
+]
+
+
+def _response_export_rows(response_id: Optional[int] = None) -> List[Dict[str, Any]]:
+    with closing(get_connection()) as conn:
+        query = """
+        SELECT
+            responses.id,
+            responses.created_at,
+            responses.full_name,
+            responses.phone,
+            responses.telegram_user_id,
+            responses.username,
+            responses.chat_id,
+            vacancies.title AS vacancy_title,
+            vacancies.address AS vacancy_address
+        FROM responses
+        LEFT JOIN vacancies ON vacancies.id = responses.vacancy_id
+        """
+        params: tuple[Any, ...] = ()
+
+        if response_id is not None:
+            query += " WHERE responses.id = ?"
+            params = (response_id,)
+
+        query += " ORDER BY responses.created_at, responses.id"
+        rows = conn.execute(query, params).fetchall()
+
+    return [dict(row) for row in rows]
+
+
+def _write_response_export(rows: List[Dict[str, Any]], append: bool) -> None:
+    if not rows:
+        return
+
+    export_path = Path(RESPONSES_EXPORT_FILE)
+    file_exists = export_path.exists() and export_path.stat().st_size > 0
+    mode = "a" if append else "w"
+
+    with export_path.open(mode, newline="", encoding="utf-8-sig") as file:
+        writer = csv.DictWriter(
+            file,
+            fieldnames=RESPONSE_EXPORT_FIELDS,
+            delimiter=";",
+        )
+        if not append or not file_exists:
+            writer.writeheader()
+
+        for row in rows:
+            writer.writerow({field: row[field] for field in RESPONSE_EXPORT_FIELDS})
+
+
+def append_response_export(response_id: int) -> None:
+    rows = _response_export_rows(response_id)
+    _write_response_export(rows, append=True)
+
+
+def export_responses() -> None:
+    rows = _response_export_rows()
+    export_path = Path(RESPONSES_EXPORT_FILE)
+
+    if not rows:
+        with export_path.open("w", newline="", encoding="utf-8-sig") as file:
+            writer = csv.DictWriter(
+                file,
+                fieldnames=RESPONSE_EXPORT_FIELDS,
+                delimiter=";",
+            )
+            writer.writeheader()
+        return
+
+    _write_response_export(rows, append=False)
+
+
 def save_response(
     vacancy_id: int,
     full_name: str,
@@ -160,7 +245,7 @@ def save_response(
     chat_id: Optional[int] = None,
 ) -> None:
     with closing(get_connection()) as conn:
-        conn.execute(
+        cursor = conn.execute(
             """
             INSERT INTO responses (
                 vacancy_id,
@@ -174,4 +259,7 @@ def save_response(
             """,
             (vacancy_id, full_name, phone, telegram_user_id, username, chat_id),
         )
+        response_id = cursor.lastrowid
         conn.commit()
+
+    append_response_export(response_id)

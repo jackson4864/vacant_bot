@@ -75,7 +75,9 @@ async def persist_response(message: Message, state: FSMContext, phone: str) -> N
     title = escape_text(vacancy["title"]) if vacancy else "вакансию"
 
     await message.answer(
-        f"Спасибо! Ваш отклик на вакансию <b>{title}</b> сохранен.",
+        f"Спасибо! Ваш отклик на вакансию <b>{title}</b> сохранен.\n"
+        "С вами в ближайшее время свяжется специалист отдела подбора, "
+        "ожидайте звонка.",
         reply_markup=ReplyKeyboardRemove(),
     )
     await state.clear()
@@ -189,8 +191,7 @@ async def full_name_handler(message: Message, state: FSMContext) -> None:
     await state.set_state(ResponseForm.waiting_phone)
 
     await message.answer(
-        "Теперь отправьте телефон.\n"
-        "Можно нажать кнопку ниже или ввести номер вручную.",
+        "Теперь отправьте телефон.",
         reply_markup=phone_keyboard(),
     )
 

@@ -32,6 +32,12 @@ Import vacancies from `vacancies.xlsx`:
 python import_excel.py
 ```
 
+Export all saved responses to `responses.csv`:
+
+```powershell
+python export_responses.py
+```
+
 Start the bot:
 
 ```powershell
@@ -56,4 +62,5 @@ Optional columns:
 - `payment`
 
 The bot stores vacancies and responses in local SQLite database `vacancies.db`.
+New responses are also appended to `responses.csv` so they can be opened in Excel.
 Do not commit `.env` or local database files to git.
