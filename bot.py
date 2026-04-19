@@ -49,6 +49,7 @@ async def location_handler(message: Message) -> None:
     )
 
     nearby = [v for v in vacancies if v["distance"] <= SEARCH_RADIUS_KM]
+    nearby = sorted(nearby, key=lambda x: x["distance"])
 
     if not nearby:
         await message.answer(
@@ -56,11 +57,13 @@ async def location_handler(message: Message) -> None:
         )
         return
 
+    result_vacancies = nearby[:5]
+
     await message.answer(
-        f"Нашел вакансии рядом с вами в радиусе {SEARCH_RADIUS_KM} км:"
+        f"Нашел {len(result_vacancies)} ближайших вакансий в радиусе {SEARCH_RADIUS_KM} км:"
     )
 
-    for vacancy in nearby[:5]:
+    for vacancy in result_vacancies:
         text = f"<b>{vacancy['title']}</b>\n"
 
         if vacancy.get("description"):
