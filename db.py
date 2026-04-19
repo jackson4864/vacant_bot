@@ -16,9 +16,13 @@ def create_tables() -> None:
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS vacancies (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project TEXT,
         title TEXT NOT NULL,
         description TEXT,
+        description_2 TEXT,
         address TEXT NOT NULL,
+        maps TEXT,
+        payment TEXT,
         latitude REAL NOT NULL,
         longitude REAL NOT NULL
     )
