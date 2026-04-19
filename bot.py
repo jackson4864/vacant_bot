@@ -53,7 +53,7 @@ async def location_handler(message: Message) -> None:
 
     if not nearby:
         await message.answer(
-            f"Рядом с вами не найдено вакансий в радиусе {SEARCH_RADIUS_KM} км."
+            f"Нашел {len(result_vacancies)} вакансий в радиусе {SEARCH_RADIUS_KM} км:"
         )
         return
 
