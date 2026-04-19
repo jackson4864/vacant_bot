@@ -20,7 +20,7 @@ dp = Dispatcher()
 async def start_handler(message: Message) -> None:
     await message.answer(
         "Привет!\n\n"
-        "Я найду вакансии рядом с вами в радиусе 5 км.\n"
+        "Я найду вакансии рядом с вами в радиусе 10 км.\n"
         "Нажмите кнопку ниже и отправьте геопозицию.",
         reply_markup=location_keyboard()
     )
@@ -43,6 +43,7 @@ async def location_handler(message: Message) -> None:
     user_lon = message.location.longitude
 
     vacancies = find_nearby_vacancies(
+        print(vacancies)
         user_lat=user_lat,
         user_lon=user_lon,
         radius_km=SEARCH_RADIUS_KM
