@@ -1,28 +1,93 @@
 import asyncio
+import html
+import re
+from typing import Optional
+
 from aiogram import Bot, Dispatcher, F
-from aiogram.filters import CommandStart, Command
-from aiogram.types import Message, CallbackQuery, ReplyKeyboardRemove
-from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
+from aiogram.enums import ParseMode
+from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
+from aiogram.types import CallbackQuery, Message, ReplyKeyboardRemove
 
 from config import BOT_TOKEN, SEARCH_RADIUS_KM
-from keyboards import location_keyboard, respond_keyboard, phone_keyboard
+from db import create_tables, get_vacancy_by_id, save_response
+from keyboards import location_keyboard, phone_keyboard, respond_keyboard
 from services import find_nearby_vacancies
 from states import ResponseForm
-from db import get_vacancy_by_id, save_response
 
 
 dp = Dispatcher()
+
+
+def escape_text(value: object) -> str:
+    return html.escape(str(value), quote=False)
+
+
+def escape_url(value: object) -> str:
+    return html.escape(str(value), quote=True)
+
+
+def normalize_phone(phone: str) -> str:
+    phone = phone.strip()
+    phone = re.sub(r"[^\d+]", "", phone)
+    if phone.startswith("++"):
+        phone = "+" + phone.lstrip("+")
+    return phone
+
+
+def is_valid_phone(phone: str) -> bool:
+    normalized = normalize_phone(phone)
+    if not normalized:
+        return False
+
+    digits = re.sub(r"\D", "", normalized)
+    return 10 <= len(digits) <= 15 and (
+        normalized.startswith("+") or normalized[0].isdigit()
+    )
+
+
+def safe_maps_url(url: Optional[str]) -> Optional[str]:
+    if not url:
+        return None
+
+    url = str(url).strip()
+    if url.startswith(("http://", "https://")):
+        return url
+    return None
+
+
+async def persist_response(message: Message, state: FSMContext, phone: str) -> None:
+    data = await state.get_data()
+    vacancy_id = data["vacancy_id"]
+    full_name = data["full_name"]
+
+    save_response(
+        vacancy_id=vacancy_id,
+        full_name=full_name,
+        phone=normalize_phone(phone),
+        telegram_user_id=message.from_user.id if message.from_user else None,
+        username=message.from_user.username if message.from_user else None,
+        chat_id=message.chat.id,
+    )
+
+    vacancy = get_vacancy_by_id(vacancy_id)
+    title = escape_text(vacancy["title"]) if vacancy else "вакансию"
+
+    await message.answer(
+        f"Спасибо! Ваш отклик на вакансию <b>{title}</b> сохранен.",
+        reply_markup=ReplyKeyboardRemove(),
+    )
+    await state.clear()
 
 
 @dp.message(CommandStart())
 async def start_handler(message: Message) -> None:
     await message.answer(
         "Привет!\n\n"
-        "Я найду вакансии рядом с вами в радиусе 10 км.\n"
+        f"Я найду вакансии рядом с вами в радиусе {SEARCH_RADIUS_KM} км.\n"
         "Нажмите кнопку ниже и отправьте геопозицию.",
-        reply_markup=location_keyboard()
+        reply_markup=location_keyboard(),
     )
 
 
@@ -45,7 +110,7 @@ async def location_handler(message: Message) -> None:
     vacancies = find_nearby_vacancies(
         user_lat=user_lat,
         user_lon=user_lon,
-        radius_km=SEARCH_RADIUS_KM
+        radius_km=SEARCH_RADIUS_KM,
     )
 
     nearby = [v for v in vacancies if v["distance"] <= SEARCH_RADIUS_KM]
@@ -64,31 +129,39 @@ async def location_handler(message: Message) -> None:
     )
 
     for vacancy in result_vacancies:
-        text = f"<b>{vacancy['title']}</b>\n"
+        text = f"<b>{escape_text(vacancy['title'])}</b>\n"
 
         if vacancy.get("description"):
-            text += f"{vacancy['description']}\n"
+            text += f"{escape_text(vacancy['description'])}\n"
 
         if vacancy.get("description_2"):
-            text += f"{vacancy['description_2']}\n"
+            text += f"{escape_text(vacancy['description_2'])}\n"
 
         if vacancy.get("payment"):
-            text += f"💰 {vacancy['payment']}\n"
+            text += f"💰 {escape_text(vacancy['payment'])}\n"
 
-        text += f"📍 {vacancy['address']}\n"
-        text += f"📏 Расстояние: {vacancy['distance']} км\n"
+        text += f"📍 {escape_text(vacancy['address'])}\n"
+        text += f"📏 Расстояние: {escape_text(vacancy['distance'])} км\n"
 
-        if vacancy.get("maps"):
-            text += f"🗺 <a href=\"{vacancy['maps']}\">Открыть на карте</a>\n"
+        maps_url = safe_maps_url(vacancy.get("maps"))
+        if maps_url:
+            text += f"🗺 <a href=\"{escape_url(maps_url)}\">Открыть на карте</a>\n"
 
         await message.answer(
             text,
             reply_markup=respond_keyboard(vacancy["id"]),
-            disable_web_page_preview=True
+            disable_web_page_preview=True,
         )
+
+
 @dp.callback_query(F.data.startswith("respond:"))
 async def respond_callback_handler(callback: CallbackQuery, state: FSMContext) -> None:
-    vacancy_id = int(callback.data.split(":")[1])
+    try:
+        vacancy_id = int(callback.data.split(":", 1)[1])
+    except (IndexError, TypeError, ValueError):
+        await callback.answer("Некорректная вакансия", show_alert=True)
+        return
+
     vacancy = get_vacancy_by_id(vacancy_id)
 
     if not vacancy:
@@ -96,20 +169,19 @@ async def respond_callback_handler(callback: CallbackQuery, state: FSMContext) -
         return
 
     await state.update_data(vacancy_id=vacancy_id)
-
     await state.set_state(ResponseForm.waiting_full_name)
     await callback.message.answer(
-        f"Отклик на вакансию: <b>{vacancy['title']}</b>\n\n"
+        f"Отклик на вакансию: <b>{escape_text(vacancy['title'])}</b>\n\n"
         "Введите ваше ФИО:"
     )
     await callback.answer()
 
 
-@dp.message(ResponseForm.waiting_full_name)
+@dp.message(ResponseForm.waiting_full_name, F.text)
 async def full_name_handler(message: Message, state: FSMContext) -> None:
     full_name = message.text.strip()
 
-    if len(full_name) < 5:
+    if len(full_name) < 5 or len(full_name.split()) < 2:
         await message.answer("Пожалуйста, введите корректные ФИО.")
         return
 
@@ -119,58 +191,55 @@ async def full_name_handler(message: Message, state: FSMContext) -> None:
     await message.answer(
         "Теперь отправьте телефон.\n"
         "Можно нажать кнопку ниже или ввести номер вручную.",
-        reply_markup=phone_keyboard()
+        reply_markup=phone_keyboard(),
     )
+
+
+@dp.message(ResponseForm.waiting_full_name)
+async def full_name_fallback_handler(message: Message) -> None:
+    await message.answer("Пожалуйста, введите ФИО текстом.")
 
 
 @dp.message(ResponseForm.waiting_phone, F.contact)
 async def phone_contact_handler(message: Message, state: FSMContext) -> None:
+    if (
+        message.contact.user_id
+        and message.from_user
+        and message.contact.user_id != message.from_user.id
+    ):
+        await message.answer("Пожалуйста, отправьте свой контакт.")
+        return
+
     phone = message.contact.phone_number
-    data = await state.get_data()
+    if not is_valid_phone(phone):
+        await message.answer("Введите корректный номер телефона.")
+        return
 
-    vacancy_id = data["vacancy_id"]
-    full_name = data["full_name"]
-
-    save_response(vacancy_id=vacancy_id, full_name=full_name, phone=phone)
-
-    vacancy = get_vacancy_by_id(vacancy_id)
-
-    await message.answer(
-        f"Спасибо! Ваш отклик на вакансию <b>{vacancy['title']}</b> сохранен.",
-        reply_markup=ReplyKeyboardRemove()
-    )
-
-    await state.clear()
+    await persist_response(message, state, phone)
 
 
 @dp.message(ResponseForm.waiting_phone, F.text)
 async def phone_text_handler(message: Message, state: FSMContext) -> None:
     phone = message.text.strip()
-    data = await state.get_data()
 
-    if len(phone) < 6:
+    if not is_valid_phone(phone):
         await message.answer("Введите корректный номер телефона.")
         return
 
-    vacancy_id = data["vacancy_id"]
-    full_name = data["full_name"]
+    await persist_response(message, state, phone)
 
-    save_response(vacancy_id=vacancy_id, full_name=full_name, phone=phone)
 
-    vacancy = get_vacancy_by_id(vacancy_id)
-
-    await message.answer(
-        f"Спасибо! Ваш отклик на вакансию <b>{vacancy['title']}</b> сохранен.",
-        reply_markup=ReplyKeyboardRemove()
-    )
-
-    await state.clear()
+@dp.message(ResponseForm.waiting_phone)
+async def phone_fallback_handler(message: Message) -> None:
+    await message.answer("Отправьте телефон контактом или введите номер текстом.")
 
 
 async def main() -> None:
+    create_tables()
+
     bot = Bot(
         token=BOT_TOKEN,
-        default=DefaultBotProperties(parse_mode=ParseMode.HTML)
+        default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
     await dp.start_polling(bot)
 

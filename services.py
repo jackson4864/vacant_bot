@@ -1,6 +1,6 @@
 import math
 from typing import List, Dict, Any
-from db import get_all_vacancies
+from db import get_vacancies_in_bounds
 
 
 def haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -24,7 +24,14 @@ def find_nearby_vacancies(
     user_lon: float,
     radius_km: int = 5
 ) -> List[Dict[str, Any]]:
-    vacancies = get_all_vacancies()
+    lat_delta = radius_km / 111.0
+    lon_delta = radius_km / (111.0 * max(math.cos(math.radians(user_lat)), 0.01))
+    vacancies = get_vacancies_in_bounds(
+        min_lat=user_lat - lat_delta,
+        max_lat=user_lat + lat_delta,
+        min_lon=user_lon - lon_delta,
+        max_lon=user_lon + lon_delta,
+    )
     result = []
 
     for vacancy in vacancies:
