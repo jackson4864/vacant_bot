@@ -12,6 +12,7 @@ from vacancy_api import get_vacancies, search_vacancies
 
 BASE_URL = "https://platform-api.max.ru"
 MAX_RESULTS = 5
+BOT_LABEL = "[MAX v2]"
 user_sessions: Dict[str, Dict[str, Any]] = {}
 
 
@@ -30,7 +31,7 @@ def send_message(user_id: str, text: str) -> None:
             "Content-Type": "application/json",
         },
         params={"user_id": user_id},
-        json={"text": text},
+        json={"text": f"{BOT_LABEL}\n{text}"},
         timeout=30,
     )
     print("SEND STATUS:", response.status_code)
