@@ -3,7 +3,7 @@ import time
 from typing import Any, Dict, Optional
 
 import requests
-from requests.exceptions import ReadTimeout
+from requests.exceptions import ReadTimeout, RequestException
 
 from config import MAX_BOT_TOKEN, SEARCH_RADIUS_KM
 from db import create_tables, save_response, upsert_vacancy
@@ -13,6 +13,11 @@ from vacancy_api import get_vacancies, search_vacancies
 BASE_URL = "https://platform-api.max.ru"
 MAX_RESULTS = 5
 BOT_LABEL = "[MAX v2]"
+
+ACTION_SEARCH = "action:search"
+ACTION_CANCEL = "action:cancel"
+ACTION_BACK_TO_MENU = "action:menu"
+
 user_sessions: Dict[str, Dict[str, Any]] = {}
 
 
@@ -22,8 +27,42 @@ def require_max_token() -> str:
     return MAX_BOT_TOKEN
 
 
-def send_message(user_id: str, text: str) -> None:
+def make_keyboard(buttons: list[list[dict[str, Any]]]) -> list[dict[str, Any]]:
+    return [{"type": "inline_keyboard", "payload": {"buttons": buttons}}]
+
+
+def message_button(text: str, payload: str) -> dict[str, Any]:
+    return {
+        "type": "message",
+        "text": text,
+        "payload": payload,
+    }
+
+
+def request_geo_button(text: str = "Отправить геолокацию") -> dict[str, Any]:
+    return {
+        "type": "request_geo_location",
+        "text": text,
+    }
+
+
+def request_contact_button(text: str = "Отправить телефон") -> dict[str, Any]:
+    return {
+        "type": "request_contact",
+        "text": text,
+    }
+
+
+def send_message(
+    user_id: str,
+    text: str,
+    attachments: Optional[list[dict[str, Any]]] = None,
+) -> None:
     token = require_max_token()
+    payload: dict[str, Any] = {"text": f"{BOT_LABEL}\n{text}"}
+    if attachments:
+        payload["attachments"] = attachments
+
     response = requests.post(
         f"{BASE_URL}/messages",
         headers={
@@ -31,7 +70,7 @@ def send_message(user_id: str, text: str) -> None:
             "Content-Type": "application/json",
         },
         params={"user_id": user_id},
-        json={"text": f"{BOT_LABEL}\n{text}"},
+        json=payload,
         timeout=30,
     )
     print("SEND STATUS:", response.status_code)
@@ -40,7 +79,10 @@ def send_message(user_id: str, text: str) -> None:
 
 def get_updates(marker: Optional[str] = None) -> Dict[str, Any]:
     token = require_max_token()
-    params = {}
+    params: dict[str, Any] = {
+        "timeout": 30,
+        "types": ["message_created"],
+    }
 
     if marker:
         params["marker"] = marker
@@ -49,7 +91,7 @@ def get_updates(marker: Optional[str] = None) -> Dict[str, Any]:
         f"{BASE_URL}/updates",
         headers={"Authorization": token},
         params=params,
-        timeout=30,
+        timeout=35,
     )
     response.raise_for_status()
     data = response.json()
@@ -105,6 +147,43 @@ def is_valid_phone(phone: str) -> bool:
     )
 
 
+def main_menu_keyboard() -> list[dict[str, Any]]:
+    return make_keyboard(
+        [
+            [
+                request_geo_button("Быстрый поиск по гео"),
+            ],
+            [
+                message_button("Поиск по городу и должности", ACTION_SEARCH),
+            ],
+        ]
+    )
+
+
+def search_cancel_keyboard() -> list[dict[str, Any]]:
+    return make_keyboard(
+        [[message_button("Отмена", ACTION_CANCEL)]]
+    )
+
+
+def response_phone_keyboard() -> list[dict[str, Any]]:
+    return make_keyboard(
+        [
+            [request_contact_button("Отправить телефон")],
+            [message_button("Отмена", ACTION_CANCEL)],
+        ]
+    )
+
+
+def vacancy_actions_keyboard(index: int) -> list[dict[str, Any]]:
+    return make_keyboard(
+        [
+            [message_button("Откликнуться", f"respond:{index}")],
+            [message_button("В меню", ACTION_BACK_TO_MENU)],
+        ]
+    )
+
+
 def format_vacancy(vacancy: Dict[str, Any], index: Optional[int] = None) -> str:
     lines = []
     if index is not None:
@@ -114,8 +193,13 @@ def format_vacancy(vacancy: Dict[str, Any], index: Optional[int] = None) -> str:
 
     if vacancy.get("project"):
         lines.append(str(vacancy["project"]))
-    if vacancy.get("city"):
-        lines.append(f"Город: {vacancy['city']}")
+    if vacancy.get("region") or vacancy.get("city"):
+        location = " / ".join(
+            str(value)
+            for value in (vacancy.get("region"), vacancy.get("city"))
+            if value
+        )
+        lines.append(f"Локация: {location}")
     if vacancy.get("address"):
         lines.append(f"Адрес: {vacancy['address']}")
     if vacancy.get("payment"):
@@ -126,6 +210,8 @@ def format_vacancy(vacancy: Dict[str, Any], index: Optional[int] = None) -> str:
         lines.append(str(vacancy["description"]))
     if vacancy.get("description_2"):
         lines.append(str(vacancy["description_2"]))
+    if vacancy.get("maps"):
+        lines.append(f"Карта: {vacancy['maps']}")
 
     return "\n".join(lines)
 
@@ -134,11 +220,10 @@ def send_welcome(user_id: str) -> None:
     send_message(
         user_id,
         "Привет! Я помогу найти вакансии.\n\n"
-        f"Доступно:\n"
-        f"1. /near широта, долгота — поиск вакансий в радиусе {SEARCH_RADIUS_KM} км\n"
-        "2. /search — поиск по городу и должности\n"
-        "3. После списка вакансий отправьте номер вакансии, чтобы откликнуться\n"
-        "4. /cancel — сбросить текущий сценарий",
+        "Используйте кнопки ниже:\n"
+        "• быстрый поиск по геолокации\n"
+        "• поиск по городу и должности",
+        attachments=main_menu_keyboard(),
     )
 
 
@@ -146,16 +231,24 @@ def send_vacancy_list(user_id: str, session: Dict[str, Any], vacancies: list[Dic
     session["last_results"] = vacancies
 
     if not vacancies:
-        send_message(user_id, "По вашему запросу вакансий не найдено.")
+        send_message(
+            user_id,
+            "По вашему запросу вакансий не найдено.",
+            attachments=main_menu_keyboard(),
+        )
         return
 
-    chunks = ["Нашел вакансии:\n"]
-    for index, vacancy in enumerate(vacancies, start=1):
-        chunks.append(format_vacancy(vacancy, index=index))
-        chunks.append("")
+    send_message(
+        user_id,
+        f"Нашел {len(vacancies)} вакансий. Ниже карточки с кнопками отклика.",
+    )
 
-    chunks.append("Отправьте номер вакансии, чтобы откликнуться.")
-    send_message(user_id, "\n".join(chunks).strip())
+    for index, vacancy in enumerate(vacancies, start=1):
+        send_message(
+            user_id,
+            format_vacancy(vacancy, index=index),
+            attachments=vacancy_actions_keyboard(index),
+        )
 
 
 def start_questionnaire(user_id: str, session: Dict[str, Any], selected_vacancy: Dict[str, Any]) -> None:
@@ -170,24 +263,102 @@ def start_questionnaire(user_id: str, session: Dict[str, Any], selected_vacancy:
         "Отклик на вакансию:\n"
         f"{selected_vacancy['title']}\n\n"
         "Введите ФИО:",
+        attachments=search_cancel_keyboard(),
     )
 
 
 def complete_response(user_id: str, session: Dict[str, Any]) -> None:
     questionnaire = session["questionnaire"]
+    title = session["selected_vacancy_title"]
+
     save_response(
         vacancy_id=session["selected_vacancy_id"],
         full_name=questionnaire["full_name"],
         phone=questionnaire["phone"],
-        applicant_city=questionnaire["applicant_city"],
+        applicant_city=None,
         source_platform="max",
         external_user_id=user_id,
     )
     reset_dialog(session)
     send_message(
         user_id,
-        f"Спасибо! Ваш отклик на вакансию {session['selected_vacancy_title']} сохранен.\n"
+        f"Спасибо! Ваш отклик на вакансию {title} сохранен.\n"
         "С вами в ближайшее время свяжется специалист отдела подбора, ожидайте звонка.",
+        attachments=main_menu_keyboard(),
+    )
+
+
+def parse_contact_phone(attachments: list[dict[str, Any]]) -> Optional[str]:
+    for attachment in attachments:
+        if attachment.get("type") != "contact":
+            continue
+
+        payload = attachment.get("payload") or {}
+        vcf_info = payload.get("vcf_info", "")
+        match = re.search(r"TEL[^:]*:(\+?\d+)", vcf_info)
+        if match:
+            return match.group(1)
+
+        max_info = payload.get("max_info") or {}
+        for key in ("phone", "phone_number"):
+            if max_info.get(key):
+                return str(max_info[key])
+    return None
+
+
+def _extract_geo_from_value(value: Any) -> Optional[tuple[float, float]]:
+    if isinstance(value, dict):
+        lower_map = {str(key).lower(): val for key, val in value.items()}
+
+        lat = None
+        lon = None
+        for key in ("latitude", "lat"):
+            if key in lower_map:
+                lat = lower_map[key]
+                break
+        for key in ("longitude", "lon", "lng"):
+            if key in lower_map:
+                lon = lower_map[key]
+                break
+
+        if lat is not None and lon is not None:
+            try:
+                return float(lat), float(lon)
+            except (TypeError, ValueError):
+                pass
+
+        for nested_value in value.values():
+            result = _extract_geo_from_value(nested_value)
+            if result:
+                return result
+
+    if isinstance(value, list):
+        for item in value:
+            result = _extract_geo_from_value(item)
+            if result:
+                return result
+
+    return None
+
+
+def parse_geo(attachments: list[dict[str, Any]]) -> Optional[tuple[float, float]]:
+    for attachment in attachments:
+        result = _extract_geo_from_value(attachment)
+        if result:
+            return result
+    return None
+
+
+def begin_search_flow(user_id: str, session: Dict[str, Any]) -> None:
+    session["state"] = "waiting_search_city"
+    session["search_city"] = None
+    session["search_title"] = None
+    session["last_results"] = []
+    send_message(
+        user_id,
+        "Введите город для поиска вакансий.\n"
+        "Если город не важен, отправьте -",
+        attachments=search_cancel_keyboard(),
     )
 
 
@@ -199,6 +370,7 @@ def handle_stateful_input(user_id: str, text: str, session: Dict[str, Any]) -> b
             user_id,
             "Введите должность или часть названия вакансии.\n"
             "Если должность не важна, отправьте -",
+            attachments=search_cancel_keyboard(),
         )
         return True
 
@@ -218,17 +390,12 @@ def handle_stateful_input(user_id: str, text: str, session: Dict[str, Any]) -> b
             send_message(user_id, "Пожалуйста, введите корректные ФИО.")
             return True
         session["questionnaire"]["full_name"] = text
-        session["state"] = "waiting_applicant_city"
-        send_message(user_id, "Введите ваш город:")
-        return True
-
-    if session["state"] == "waiting_applicant_city":
-        if len(text) < 2:
-            send_message(user_id, "Пожалуйста, введите корректный город.")
-            return True
-        session["questionnaire"]["applicant_city"] = text
         session["state"] = "waiting_phone"
-        send_message(user_id, "Введите номер телефона:")
+        send_message(
+            user_id,
+            "Отправьте телефон кнопкой ниже или введите номер вручную.",
+            attachments=response_phone_keyboard(),
+        )
         return True
 
     if session["state"] == "waiting_phone":
@@ -242,28 +409,48 @@ def handle_stateful_input(user_id: str, text: str, session: Dict[str, Any]) -> b
     return False
 
 
-def try_handle_vacancy_selection(user_id: str, text: str, session: Dict[str, Any]) -> bool:
-    if not session["last_results"]:
-        return False
-
-    selection_text = text
-    if text.lower().startswith("/respond"):
-        parts = text.split(maxsplit=1)
-        if len(parts) == 1:
-            send_message(user_id, "После /respond укажите номер вакансии, например: /respond 2")
-            return True
-        selection_text = parts[1].strip()
-
-    if not selection_text.isdigit():
-        return False
-
-    index = int(selection_text) - 1
-    if index < 0 or index >= len(session["last_results"]):
-        send_message(user_id, "Нет вакансии с таким номером.")
+def try_handle_action(user_id: str, text: str, session: Dict[str, Any]) -> bool:
+    if text == ACTION_SEARCH:
+        begin_search_flow(user_id, session)
         return True
 
-    start_questionnaire(user_id, session, session["last_results"][index])
-    return True
+    if text == ACTION_CANCEL:
+        reset_dialog(session)
+        send_message(
+            user_id,
+            "Текущий сценарий сброшен.",
+            attachments=main_menu_keyboard(),
+        )
+        return True
+
+    if text == ACTION_BACK_TO_MENU:
+        reset_dialog(session)
+        send_message(
+            user_id,
+            "Вернул вас в главное меню.",
+            attachments=main_menu_keyboard(),
+        )
+        return True
+
+    if text.startswith("respond:"):
+        if not session["last_results"]:
+            send_message(user_id, "Сначала получите список вакансий.")
+            return True
+
+        try:
+            index = int(text.split(":", 1)[1]) - 1
+        except ValueError:
+            send_message(user_id, "Не удалось определить выбранную вакансию.")
+            return True
+
+        if index < 0 or index >= len(session["last_results"]):
+            send_message(user_id, "Нет вакансии с таким номером.")
+            return True
+
+        start_questionnaire(user_id, session, session["last_results"][index])
+        return True
+
+    return False
 
 
 def handle_near_command(user_id: str, text: str, session: Dict[str, Any]) -> bool:
@@ -288,17 +475,49 @@ def handle_near_command(user_id: str, text: str, session: Dict[str, Any]) -> boo
     return True
 
 
-def handle_text_message(user_id: str, text: str) -> None:
+def handle_geo(user_id: str, attachments: list[dict[str, Any]], session: Dict[str, Any]) -> bool:
+    geo = parse_geo(attachments)
+    if not geo:
+        return False
+
+    user_lat, user_lon = geo
+    vacancies = find_nearest_vacancies(
+        user_lat=user_lat,
+        user_lon=user_lon,
+        vacancies=get_vacancies(),
+        radius_km=SEARCH_RADIUS_KM,
+        limit=MAX_RESULTS,
+    )
+    send_vacancy_list(user_id, session, vacancies)
+    return True
+
+
+def handle_contact(user_id: str, attachments: list[dict[str, Any]], session: Dict[str, Any]) -> bool:
+    if session["state"] != "waiting_phone":
+        return False
+
+    phone = parse_contact_phone(attachments)
+    if not phone or not is_valid_phone(phone):
+        send_message(user_id, "Не удалось прочитать номер телефона, введите его вручную.")
+        return True
+
+    session["questionnaire"]["phone"] = normalize_phone(phone)
+    complete_response(user_id, session)
+    return True
+
+
+def handle_text_message(user_id: str, text: str, attachments: list[dict[str, Any]]) -> None:
     session = get_session(user_id)
     text = normalize_text(text)
 
-    if not text:
-        send_message(user_id, "Отправьте текстовую команду или запрос.")
+    if handle_contact(user_id, attachments, session):
         return
 
-    if text.lower() == "/cancel":
-        reset_dialog(session)
-        send_message(user_id, "Текущий сценарий сброшен.")
+    if handle_geo(user_id, attachments, session):
+        return
+
+    if not text:
+        send_message(user_id, "Нажмите кнопку меню или отправьте текстовый запрос.", attachments=main_menu_keyboard())
         return
 
     if text.lower() == "/start":
@@ -306,33 +525,28 @@ def handle_text_message(user_id: str, text: str) -> None:
         send_welcome(user_id)
         return
 
+    if try_handle_action(user_id, text, session):
+        return
+
     if handle_stateful_input(user_id, text, session):
         return
 
     if text.lower() == "/search":
-        session["state"] = "waiting_search_city"
-        session["search_city"] = None
-        session["search_title"] = None
-        session["last_results"] = []
-        send_message(
-            user_id,
-            "Введите город для поиска вакансий.\n"
-            "Если город не важен, отправьте -",
-        )
+        begin_search_flow(user_id, session)
         return
 
     if handle_near_command(user_id, text, session):
         return
 
-    if try_handle_vacancy_selection(user_id, text, session):
+    if text.lower() == "/cancel":
+        reset_dialog(session)
+        send_message(user_id, "Текущий сценарий сброшен.", attachments=main_menu_keyboard())
         return
 
     send_message(
         user_id,
-        "Не понял запрос.\n"
-        f"Используйте /near широта, долгота для поиска в радиусе {SEARCH_RADIUS_KM} км,\n"
-        "/search для поиска по городу и должности\n"
-        "или /start для подсказки.",
+        "Не понял запрос. Используйте кнопки ниже или /start для возврата в меню.",
+        attachments=main_menu_keyboard(),
     )
 
 
@@ -342,7 +556,7 @@ def handle_update(update: Dict[str, Any]) -> None:
 
     message = update.get("message", {})
     sender = message.get("sender", {})
-    body = message.get("body", {})
+    body = message.get("body", {}) or {}
 
     if sender.get("is_bot"):
         return
@@ -352,7 +566,8 @@ def handle_update(update: Dict[str, Any]) -> None:
         return
 
     text = body.get("text", "")
-    handle_text_message(str(user_id), text)
+    attachments = body.get("attachments") or []
+    handle_text_message(str(user_id), text, attachments)
 
 
 def main() -> None:
@@ -373,6 +588,8 @@ def main() -> None:
 
         except ReadTimeout:
             pass
+        except RequestException as exc:
+            print("NETWORK ERROR:", exc)
         except Exception as exc:
             print("ERROR:", exc)
 
@@ -381,3 +598,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
