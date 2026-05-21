@@ -406,6 +406,9 @@ async def phone_fallback_handler(message: Message) -> None:
 async def main() -> None:
     create_tables()
 
+    if not BOT_TOKEN:
+        raise ValueError("BOT_TOKEN is not set in .env")
+
     bot = Bot(
         token=BOT_TOKEN,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),

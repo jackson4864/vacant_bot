@@ -15,6 +15,7 @@ pip install -r requirements.txt
 
 ```env
 BOT_TOKEN=your_telegram_bot_token
+MAX_BOT_TOKEN=your_max_bot_token
 SEARCH_RADIUS_KM=10
 ```
 
@@ -48,6 +49,16 @@ Start the bot:
 python bot.py
 ```
 
+Start the Max bot:
+
+```powershell
+python max_bot.py
+```
+
+`max_bot.py` takes vacancies from the external source in
+`vacancy_api.py` (SheetDB API). Local SQLite is still used for storing responses
+and for keeping a local copy of the vacancy that the user responded to.
+
 ## Data
 
 `vacancies.xlsx` must contain these columns:
@@ -75,3 +86,11 @@ Do not commit `.env` or local database files to git.
 
 - `/start` - quick search by geolocation and main menu.
 - `/catalog` - choose region and city, then browse vacancies.
+
+## Max bot commands
+
+- `/start` - show help and available scenarios.
+- `/near 55.75, 37.61` - find vacancies within 10 km by coordinates.
+- `/search` - step-by-step search by city and position.
+- `/respond 2` or just `2` after a vacancy list - start the questionnaire.
+- `/cancel` - reset the current dialog.

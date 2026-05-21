@@ -66,6 +66,9 @@ def create_tables() -> None:
             vacancy_id INTEGER NOT NULL,
             full_name TEXT NOT NULL,
             phone TEXT NOT NULL,
+            applicant_city TEXT,
+            source_platform TEXT DEFAULT 'telegram',
+            external_user_id TEXT,
             telegram_user_id INTEGER,
             username TEXT,
             chat_id INTEGER,
@@ -77,6 +80,9 @@ def create_tables() -> None:
         _add_column_if_missing(conn, "responses", "telegram_user_id", "INTEGER")
         _add_column_if_missing(conn, "responses", "username", "TEXT")
         _add_column_if_missing(conn, "responses", "chat_id", "INTEGER")
+        _add_column_if_missing(conn, "responses", "applicant_city", "TEXT")
+        _add_column_if_missing(conn, "responses", "source_platform", "TEXT DEFAULT 'telegram'")
+        _add_column_if_missing(conn, "responses", "external_user_id", "TEXT")
 
         cursor.execute("""
         CREATE INDEX IF NOT EXISTS idx_vacancies_region_city
@@ -170,6 +176,85 @@ def get_vacancy_by_id(vacancy_id: int) -> Optional[Dict[str, Any]]:
     return dict(row) if row else None
 
 
+def upsert_vacancy(vacancy: Dict[str, Any]) -> int:
+    title = str(vacancy["title"]).strip()
+    address = str(vacancy["address"]).strip()
+    latitude = float(vacancy["latitude"])
+    longitude = float(vacancy["longitude"])
+
+    with closing(get_connection()) as conn:
+        existing = conn.execute(
+            """
+            SELECT id FROM vacancies
+            WHERE title = ?
+              AND address = ?
+              AND latitude = ?
+              AND longitude = ?
+            """,
+            (title, address, latitude, longitude),
+        ).fetchone()
+
+        values = (
+            vacancy.get("project"),
+            vacancy.get("region"),
+            vacancy.get("city"),
+            title,
+            vacancy.get("description"),
+            vacancy.get("description_2"),
+            address,
+            vacancy.get("maps"),
+            vacancy.get("payment"),
+            latitude,
+            longitude,
+        )
+
+        if existing:
+            conn.execute(
+                """
+                UPDATE vacancies
+                SET project = ?,
+                    region = ?,
+                    city = ?,
+                    title = ?,
+                    description = ?,
+                    description_2 = ?,
+                    address = ?,
+                    maps = ?,
+                    payment = ?,
+                    latitude = ?,
+                    longitude = ?,
+                    is_active = 1
+                WHERE id = ?
+                """,
+                values + (existing["id"],),
+            )
+            conn.commit()
+            return int(existing["id"])
+
+        cursor = conn.execute(
+            """
+            INSERT INTO vacancies (
+                project,
+                region,
+                city,
+                title,
+                description,
+                description_2,
+                address,
+                maps,
+                payment,
+                latitude,
+                longitude,
+                is_active
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+            """,
+            values,
+        )
+        conn.commit()
+        return int(cursor.lastrowid)
+
+
 def get_regions() -> List[str]:
     with closing(get_connection()) as conn:
         rows = conn.execute(
@@ -213,9 +298,39 @@ def get_vacancies_by_city(region: str, city: str) -> List[Dict[str, Any]]:
     return [dict(row) for row in rows]
 
 
+def search_vacancies(
+    city: Optional[str] = None,
+    title_query: Optional[str] = None,
+    limit: int = 10,
+) -> List[Dict[str, Any]]:
+    query = """
+    SELECT * FROM vacancies
+    WHERE is_active = 1
+    """
+    params: list[Any] = []
+
+    if city:
+        query += " AND LOWER(city) = LOWER(?)"
+        params.append(city.strip())
+
+    if title_query:
+        query += " AND LOWER(title) LIKE LOWER(?)"
+        params.append(f"%{title_query.strip()}%")
+
+    query += " ORDER BY region, city, project, title, address LIMIT ?"
+    params.append(limit)
+
+    with closing(get_connection()) as conn:
+        rows = conn.execute(query, tuple(params)).fetchall()
+    return [dict(row) for row in rows]
+
+
 RESPONSE_EXPORT_FIELDS = [
     "created_at",
+    "source_platform",
+    "external_user_id",
     "full_name",
+    "applicant_city",
     "phone",
     "vacancy_region",
     "vacancy_city",
@@ -233,7 +348,10 @@ def _response_export_rows(response_id: Optional[int] = None) -> List[Dict[str, A
         SELECT
             responses.id,
             responses.created_at,
+            responses.source_platform,
+            responses.external_user_id,
             responses.full_name,
+            responses.applicant_city,
             responses.phone,
             responses.telegram_user_id,
             responses.username,
@@ -304,6 +422,9 @@ def save_response(
     vacancy_id: int,
     full_name: str,
     phone: str,
+    applicant_city: Optional[str] = None,
+    source_platform: str = "telegram",
+    external_user_id: Optional[str] = None,
     telegram_user_id: Optional[int] = None,
     username: Optional[str] = None,
     chat_id: Optional[int] = None,
@@ -315,13 +436,26 @@ def save_response(
                 vacancy_id,
                 full_name,
                 phone,
+                applicant_city,
+                source_platform,
+                external_user_id,
                 telegram_user_id,
                 username,
                 chat_id
             )
-            VALUES (?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (vacancy_id, full_name, phone, telegram_user_id, username, chat_id),
+            (
+                vacancy_id,
+                full_name,
+                phone,
+                applicant_city,
+                source_platform,
+                external_user_id,
+                telegram_user_id,
+                username,
+                chat_id,
+            ),
         )
         response_id = cursor.lastrowid
         conn.commit()
