@@ -1,5 +1,5 @@
 import math
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from db import get_vacancies_in_bounds
 
@@ -30,7 +30,7 @@ def find_nearest_vacancies(
     user_lon: float,
     vacancies: List[Dict[str, Any]],
     radius_km: int = 10,
-    limit: int = 5,
+    limit: Optional[int] = 5,
 ) -> List[Dict[str, Any]]:
     result = []
 
@@ -48,6 +48,8 @@ def find_nearest_vacancies(
 
     result = sorted(result, key=lambda x: x["distance"])
 
+    if limit is None:
+        return result
     return result[:limit]
 
 
@@ -55,7 +57,7 @@ def find_nearby_vacancies(
     user_lat: float,
     user_lon: float,
     radius_km: int = 10,
-    limit: int = 5,
+    limit: Optional[int] = 5,
 ) -> List[Dict[str, Any]]:
     lat_delta = radius_km / 111.0
     lon_delta = radius_km / (111.0 * max(math.cos(math.radians(user_lat)), 0.01))

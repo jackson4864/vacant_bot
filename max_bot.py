@@ -20,6 +20,7 @@ ACTION_CANCEL = "action:cancel"
 ACTION_BACK_TO_MENU = "action:menu"
 ACTION_SKIP_CITY = "action:skip_city"
 ACTION_SKIP_TITLE = "action:skip_title"
+ACTION_SHOW_MORE = "action:show_more"
 TITLE_PREFIX = "title:"
 RESPOND_PREFIX = "respond:"
 LABEL_SEARCH = "Поиск по городу и должности"
@@ -28,6 +29,7 @@ LABEL_MENU = "В меню"
 LABEL_SKIP_CITY = "Любой город"
 LABEL_SKIP_TITLE = "Любая должность"
 LABEL_RESPOND_PREFIX = "Откликнуться #"
+LABEL_SHOW_MORE = "Показать еще"
 
 user_sessions: Dict[str, Dict[str, Any]] = {}
 
@@ -99,6 +101,15 @@ def vacancy_actions_keyboard(index: int) -> list[dict[str, Any]]:
     )
 
 
+def show_more_keyboard() -> list[dict[str, Any]]:
+    return make_keyboard(
+        [
+            [message_button(LABEL_SHOW_MORE, ACTION_SHOW_MORE)],
+            [message_button(LABEL_MENU, ACTION_BACK_TO_MENU)],
+        ]
+    )
+
+
 def title_keyboard(titles: list[str]) -> list[dict[str, Any]]:
     buttons = [message_button(title, f"{TITLE_PREFIX}{title}") for title in titles]
     rows = chunk_buttons(buttons)
@@ -160,7 +171,8 @@ def get_session(user_id: str) -> Dict[str, Any]:
             "search_city": None,
             "search_title": None,
             "available_titles": [],
-            "last_results": [],
+            "all_results": [],
+            "result_offset": 0,
             "selected_vacancy_id": None,
             "selected_vacancy_title": None,
             "questionnaire": {},
@@ -173,7 +185,8 @@ def reset_dialog(session: Dict[str, Any]) -> None:
     session["search_city"] = None
     session["search_title"] = None
     session["available_titles"] = []
-    session["last_results"] = []
+    session["all_results"] = []
+    session["result_offset"] = 0
     session["selected_vacancy_id"] = None
     session["selected_vacancy_title"] = None
     session["questionnaire"] = {}
@@ -244,7 +257,8 @@ def send_welcome(user_id: str) -> None:
 
 
 def send_vacancy_list(user_id: str, session: Dict[str, Any], vacancies: list[Dict[str, Any]]) -> None:
-    session["last_results"] = vacancies
+    session["all_results"] = vacancies
+    session["result_offset"] = 0
 
     if not vacancies:
         send_message(
@@ -254,16 +268,44 @@ def send_vacancy_list(user_id: str, session: Dict[str, Any], vacancies: list[Dic
         )
         return
 
-    send_message(
-        user_id,
-        f"Нашел {len(vacancies)} вакансий. Ниже карточки с кнопками отклика.",
-    )
+    send_next_results_page(user_id, session)
 
-    for index, vacancy in enumerate(vacancies, start=1):
+
+def send_next_results_page(user_id: str, session: Dict[str, Any]) -> None:
+    vacancies = session["all_results"]
+    start = session["result_offset"]
+    end = min(start + MAX_RESULTS, len(vacancies))
+
+    if start == 0:
         send_message(
             user_id,
-            format_vacancy(vacancy, index=index),
-            attachments=vacancy_actions_keyboard(index),
+            f"Нашел {len(vacancies)} вакансий. Ниже карточки с кнопками отклика.",
+        )
+    else:
+        send_message(user_id, f"Показываю вакансии {start + 1}-{end} из {len(vacancies)}.")
+
+    for index in range(start, end):
+        vacancy = vacancies[index]
+        display_index = index + 1
+        send_message(
+            user_id,
+            format_vacancy(vacancy, index=display_index),
+            attachments=vacancy_actions_keyboard(display_index),
+        )
+
+    session["result_offset"] = end
+
+    if end < len(vacancies):
+        send_message(
+            user_id,
+            f"Показаны {end} из {len(vacancies)} вакансий.",
+            attachments=show_more_keyboard(),
+        )
+    else:
+        send_message(
+            user_id,
+            "Это все найденные вакансии.",
+            attachments=main_menu_keyboard(),
         )
 
 
@@ -386,6 +428,8 @@ def extract_action_token(text: str, payload: Any) -> str:
         return ACTION_SKIP_CITY
     if normalized_text == LABEL_SKIP_TITLE:
         return ACTION_SKIP_TITLE
+    if normalized_text == LABEL_SHOW_MORE:
+        return ACTION_SHOW_MORE
     if normalized_text.startswith(LABEL_RESPOND_PREFIX):
         index = normalized_text.removeprefix(LABEL_RESPOND_PREFIX).strip()
         if index.isdigit():
@@ -399,7 +443,8 @@ def begin_search_flow(user_id: str, session: Dict[str, Any]) -> None:
     session["search_city"] = None
     session["search_title"] = None
     session["available_titles"] = []
-    session["last_results"] = []
+    session["all_results"] = []
+    session["result_offset"] = 0
     send_message(
         user_id,
         "Введите город для поиска вакансий.\n"
@@ -421,7 +466,7 @@ def ask_for_title(user_id: str, session: Dict[str, Any]) -> None:
         vacancies = search_vacancies(
             city=session["search_city"],
             title_query=None,
-            limit=MAX_RESULTS,
+            limit=None,
         )
         session["state"] = None
         send_vacancy_list(user_id, session, vacancies)
@@ -450,7 +495,7 @@ def handle_stateful_input(user_id: str, text: str, session: Dict[str, Any]) -> b
             vacancies = search_vacancies(
                 city=session["search_city"],
                 title_query=session["search_title"],
-                limit=MAX_RESULTS,
+                limit=None,
             )
             session["state"] = None
             send_vacancy_list(user_id, session, vacancies)
@@ -529,10 +574,20 @@ def try_handle_action(user_id: str, action: str, session: Dict[str, Any]) -> boo
         vacancies = search_vacancies(
             city=session["search_city"],
             title_query=None,
-            limit=MAX_RESULTS,
+            limit=None,
         )
         session["state"] = None
         send_vacancy_list(user_id, session, vacancies)
+        return True
+
+    if action == ACTION_SHOW_MORE:
+        if not session["all_results"]:
+            send_message(user_id, "Сначала выполните поиск вакансий.")
+            return True
+        if session["result_offset"] >= len(session["all_results"]):
+            send_message(user_id, "Больше вакансий нет.", attachments=main_menu_keyboard())
+            return True
+        send_next_results_page(user_id, session)
         return True
 
     if action.startswith(TITLE_PREFIX):
@@ -544,14 +599,14 @@ def try_handle_action(user_id: str, action: str, session: Dict[str, Any]) -> boo
         vacancies = search_vacancies(
             city=session["search_city"],
             title_query=session["search_title"],
-            limit=MAX_RESULTS,
+            limit=None,
         )
         session["state"] = None
         send_vacancy_list(user_id, session, vacancies)
         return True
 
     if action.startswith(RESPOND_PREFIX):
-        if not session["last_results"]:
+        if not session["all_results"]:
             send_message(user_id, "Сначала получите список вакансий.")
             return True
 
@@ -561,11 +616,11 @@ def try_handle_action(user_id: str, action: str, session: Dict[str, Any]) -> boo
             send_message(user_id, "Не удалось определить выбранную вакансию.")
             return True
 
-        if index < 0 or index >= len(session["last_results"]):
+        if index < 0 or index >= len(session["all_results"]):
             send_message(user_id, "Нет вакансии с таким номером.")
             return True
 
-        start_questionnaire(user_id, session, session["last_results"][index])
+        start_questionnaire(user_id, session, session["all_results"][index])
         return True
 
     return False
@@ -587,7 +642,7 @@ def handle_near_command(user_id: str, text: str, session: Dict[str, Any]) -> boo
         user_lon=user_lon,
         vacancies=get_vacancies(),
         radius_km=SEARCH_RADIUS_KM,
-        limit=MAX_RESULTS,
+        limit=None,
     )
     send_vacancy_list(user_id, session, vacancies)
     return True
@@ -604,7 +659,7 @@ def handle_geo(user_id: str, attachments: list[dict[str, Any]], session: Dict[st
         user_lon=user_lon,
         vacancies=get_vacancies(),
         radius_km=SEARCH_RADIUS_KM,
-        limit=MAX_RESULTS,
+        limit=None,
     )
     send_vacancy_list(user_id, session, vacancies)
     return True

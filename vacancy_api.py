@@ -1,3 +1,5 @@
+from typing import Optional
+
 import requests
 from requests import RequestException
 
@@ -44,7 +46,7 @@ def get_vacancies():
     return valid_vacancies
 
 
-def search_vacancies(city=None, title_query=None, limit=10):
+def search_vacancies(city=None, title_query=None, limit: Optional[int] = 10):
     vacancies = get_vacancies()
     result = []
 
@@ -72,6 +74,8 @@ def search_vacancies(city=None, title_query=None, limit=10):
             vacancy.get("address") or "",
         )
     )
+    if limit is None:
+        return result
     return result[:limit]
 
 
