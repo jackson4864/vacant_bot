@@ -73,3 +73,21 @@ def search_vacancies(city=None, title_query=None, limit=10):
         )
     )
     return result[:limit]
+
+
+def get_available_titles(city=None):
+    vacancies = get_vacancies()
+    city_normalized = city.strip().lower() if city else None
+    titles = []
+
+    for vacancy in vacancies:
+        vacancy_city = str(vacancy.get("city", "")).strip().lower()
+        if city_normalized and vacancy_city != city_normalized:
+            continue
+
+        title = str(vacancy.get("title", "")).strip()
+        if title and title not in titles:
+            titles.append(title)
+
+    titles.sort()
+    return titles
