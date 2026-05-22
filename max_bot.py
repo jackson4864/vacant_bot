@@ -22,6 +22,12 @@ ACTION_SKIP_CITY = "action:skip_city"
 ACTION_SKIP_TITLE = "action:skip_title"
 TITLE_PREFIX = "title:"
 RESPOND_PREFIX = "respond:"
+LABEL_SEARCH = "Поиск по городу и должности"
+LABEL_CANCEL = "Отмена"
+LABEL_MENU = "В меню"
+LABEL_SKIP_CITY = "Любой город"
+LABEL_SKIP_TITLE = "Любая должность"
+LABEL_RESPOND_PREFIX = "Откликнуться #"
 
 user_sessions: Dict[str, Dict[str, Any]] = {}
 
@@ -66,20 +72,20 @@ def main_menu_keyboard() -> list[dict[str, Any]]:
     return make_keyboard(
         [
             [request_geo_button("Быстрый поиск по гео")],
-            [message_button("Поиск по городу и должности", ACTION_SEARCH)],
+            [message_button(LABEL_SEARCH, ACTION_SEARCH)],
         ]
     )
 
 
 def cancel_keyboard() -> list[dict[str, Any]]:
-    return make_keyboard([[message_button("Отмена", ACTION_CANCEL)]])
+    return make_keyboard([[message_button(LABEL_CANCEL, ACTION_CANCEL)]])
 
 
 def phone_keyboard() -> list[dict[str, Any]]:
     return make_keyboard(
         [
             [request_contact_button("Отправить телефон")],
-            [message_button("Отмена", ACTION_CANCEL)],
+            [message_button(LABEL_CANCEL, ACTION_CANCEL)],
         ]
     )
 
@@ -87,8 +93,8 @@ def phone_keyboard() -> list[dict[str, Any]]:
 def vacancy_actions_keyboard(index: int) -> list[dict[str, Any]]:
     return make_keyboard(
         [
-            [message_button("Откликнуться", f"{RESPOND_PREFIX}{index}")],
-            [message_button("В меню", ACTION_BACK_TO_MENU)],
+            [message_button(f"{LABEL_RESPOND_PREFIX}{index}", f"{RESPOND_PREFIX}{index}")],
+            [message_button(LABEL_MENU, ACTION_BACK_TO_MENU)],
         ]
     )
 
@@ -96,8 +102,8 @@ def vacancy_actions_keyboard(index: int) -> list[dict[str, Any]]:
 def title_keyboard(titles: list[str]) -> list[dict[str, Any]]:
     buttons = [message_button(title, f"{TITLE_PREFIX}{title}") for title in titles]
     rows = chunk_buttons(buttons)
-    rows.append([message_button("Любая должность", ACTION_SKIP_TITLE)])
-    rows.append([message_button("Отмена", ACTION_CANCEL)])
+    rows.append([message_button(LABEL_SKIP_TITLE, ACTION_SKIP_TITLE)])
+    rows.append([message_button(LABEL_CANCEL, ACTION_CANCEL)])
     return make_keyboard(rows)
 
 
@@ -369,7 +375,23 @@ def extract_action_token(text: str, payload: Any) -> str:
             if isinstance(value, str) and value.strip():
                 return value.strip()
 
-    return text.strip()
+    normalized_text = text.strip()
+    if normalized_text == LABEL_SEARCH:
+        return ACTION_SEARCH
+    if normalized_text == LABEL_CANCEL:
+        return ACTION_CANCEL
+    if normalized_text == LABEL_MENU:
+        return ACTION_BACK_TO_MENU
+    if normalized_text == LABEL_SKIP_CITY:
+        return ACTION_SKIP_CITY
+    if normalized_text == LABEL_SKIP_TITLE:
+        return ACTION_SKIP_TITLE
+    if normalized_text.startswith(LABEL_RESPOND_PREFIX):
+        index = normalized_text.removeprefix(LABEL_RESPOND_PREFIX).strip()
+        if index.isdigit():
+            return f"{RESPOND_PREFIX}{index}"
+
+    return normalized_text
 
 
 def begin_search_flow(user_id: str, session: Dict[str, Any]) -> None:
@@ -384,8 +406,8 @@ def begin_search_flow(user_id: str, session: Dict[str, Any]) -> None:
         "Если город не важен, нажмите кнопку ниже.",
         attachments=make_keyboard(
             [
-                [message_button("Любой город", ACTION_SKIP_CITY)],
-                [message_button("Отмена", ACTION_CANCEL)],
+                [message_button(LABEL_SKIP_CITY, ACTION_SKIP_CITY)],
+                [message_button(LABEL_CANCEL, ACTION_CANCEL)],
             ]
         ),
     )
