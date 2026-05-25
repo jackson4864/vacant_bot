@@ -8,7 +8,7 @@ from typing import Optional
 from aiogram import Bot, Dispatcher, F
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from aiogram.filters import Command, CommandStart
+from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, FSInputFile, Message
 
@@ -99,6 +99,18 @@ def format_profile(profile: dict) -> str:
     )
 
 
+async def send_consent_document(message: Message) -> None:
+    if not CONSENT_DOC_PATH.exists():
+        await message.answer("⚠️ Документ по обработке персональных данных пока не найден на сервере.")
+        print("TELEGRAM CONSENT DOC MISSING:", CONSENT_DOC_PATH)
+        return
+
+    await message.answer_document(
+        FSInputFile(CONSENT_DOC_PATH),
+        caption="📎 Документ по обработке персональных данных.",
+    )
+
+
 async def send_registration_intro(message: Message) -> None:
     await message.answer(
         "👋 Давайте познакомимся и соберем основную информацию для связи.\n\n"
@@ -107,11 +119,7 @@ async def send_registration_intro(message: Message) -> None:
         "👤 ФИО\n"
         "📞 телефон для связи",
     )
-    if CONSENT_DOC_PATH.exists():
-        await message.answer_document(
-            FSInputFile(CONSENT_DOC_PATH),
-            caption="📎 Документ по обработке персональных данных.",
-        )
+    await send_consent_document(message)
     await message.answer(
         "📄 <b>Согласие на обработку персональных данных</b>\n\n"
         "Пожалуйста, ознакомьтесь с документом выше.\n\n"
@@ -400,17 +408,26 @@ async def persist_response(message: Message, state: FSMContext, phone: str) -> N
     data = await state.get_data()
     vacancy_id = data["vacancy_id"]
     full_name = data["full_name"]
+    profile = get_telegram_profile(message)
+    applicant_city = profile["applicant_city"] if profile else data.get("applicant_city")
+    external_user_id = telegram_external_user_id(message)
 
     save_response(
         vacancy_id=vacancy_id,
         full_name=full_name,
         phone=normalize_phone(phone),
+        applicant_city=applicant_city,
+        source_platform="telegram",
+        external_user_id=external_user_id,
         telegram_user_id=message.from_user.id if message.from_user else None,
         username=message.from_user.username if message.from_user else None,
         chat_id=message.chat.id,
     )
 
     vacancy = get_vacancy_by_id(vacancy_id)
+    if profile and vacancy and external_user_id:
+        append_response_to_sheet(external_user_id, profile, vacancy)
+
     title = escape_text(vacancy["title"]) if vacancy else "вакансию"
 
     await message.answer(
@@ -448,7 +465,6 @@ async def persist_response_with_profile(
 
 
 @dp.message(CommandStart())
-@dp.message(Command("start"))
 async def start_handler(message: Message, state: FSMContext) -> None:
     await state.clear()
     if not get_telegram_profile(message):
@@ -456,15 +472,16 @@ async def start_handler(message: Message, state: FSMContext) -> None:
         return
 
     await message.answer(
-        "👋 Привет!\n\n"
-        f"💼 Я найду вакансии рядом с вами в радиусе {SEARCH_RADIUS_KM} км.\n"
-        "📍 Для быстрого поиска отправьте геопозицию.\n"
-        "🏙 Для просмотра по региону и городу откройте каталог.",
+        "👋 Привет! Рад видеть вас в боте вакансий.\n\n"
+        "Здесь можно быстро найти подходящую подработку или постоянную вакансию, "
+        "откликнуться в пару нажатий и получать уведомления о новых предложениях в вашем городе.\n\n"
+        f"📍 Быстрый поиск работает по геопозиции в радиусе {SEARCH_RADIUS_KM} км.\n"
+        "🏙 Каталог помогает посмотреть вакансии по городу.",
         reply_markup=main_menu_keyboard(),
     )
 
 
-@dp.message(Command("help"))
+@dp.message(F.text == "/help")
 async def help_handler(message: Message) -> None:
     await message.answer(
         "ℹ️ <b>Как это работает:</b>\n\n"
@@ -476,7 +493,7 @@ async def help_handler(message: Message) -> None:
     )
 
 
-@dp.message(Command("catalog"))
+@dp.message(F.text == "/catalog")
 async def catalog_command_handler(message: Message, state: FSMContext) -> None:
     await show_regions(message, state)
 
@@ -504,6 +521,12 @@ async def main_my_data_callback(callback: CallbackQuery) -> None:
         return
 
     await callback.message.answer(format_profile(profile), reply_markup=main_menu_keyboard())
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "main:consent_doc")
+async def main_consent_doc_callback(callback: CallbackQuery) -> None:
+    await send_consent_document(callback.message)
     await callback.answer()
 
 
