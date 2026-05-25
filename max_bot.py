@@ -202,6 +202,7 @@ def send_message(
 
 
 def upload_file_attachment(file_path: Path) -> Optional[dict[str, Any]]:
+    print("MAX FILE UPLOAD START:", file_path)
     if not file_path.exists():
         print("MAX FILE UPLOAD SKIPPED: file not found", file_path)
         return None
@@ -238,8 +239,10 @@ def upload_file_attachment(file_path: Path) -> Optional[dict[str, Any]]:
 
 
 def send_personal_data_document(user_id: str) -> None:
+    print("MAX FILE SEND START:", user_id)
     attachment = upload_file_attachment(CONSENT_DOC_PATH)
     if not attachment:
+        print("MAX FILE SEND SKIPPED: no attachment")
         return
 
     for attempt in range(3):
@@ -348,6 +351,7 @@ def format_profile(profile: Dict[str, Any]) -> str:
 
 
 def send_registration_intro(user_id: str) -> None:
+    send_personal_data_document(user_id)
     send_message(
         user_id,
         "👋 Давайте познакомимся и соберем основную информацию для связи.\n\n"
@@ -513,7 +517,6 @@ def send_next_results_page(user_id: str, session: Dict[str, Any]) -> None:
 def start_questionnaire(user_id: str, session: Dict[str, Any], selected_vacancy: Dict[str, Any]) -> None:
     profile = get_max_profile(user_id)
     if not profile:
-        send_personal_data_document(user_id)
         send_registration_intro(user_id)
         return
 
