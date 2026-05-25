@@ -23,13 +23,13 @@ ACTION_SKIP_TITLE = "action:skip_title"
 ACTION_SHOW_MORE = "action:show_more"
 TITLE_PREFIX = "title:"
 RESPOND_PREFIX = "respond:"
-LABEL_SEARCH = "Поиск по городу и должности"
-LABEL_CANCEL = "Отмена"
-LABEL_MENU = "В меню"
-LABEL_SKIP_CITY = "Любой город"
-LABEL_SKIP_TITLE = "Любая должность"
+LABEL_SEARCH = "🔎 Поиск по городу и должности"
+LABEL_CANCEL = "❌ Отмена"
+LABEL_MENU = "🏠 В меню"
+LABEL_SKIP_CITY = "🌍 Любой город"
+LABEL_SKIP_TITLE = "💼 Любая должность"
 LABEL_RESPOND_PREFIX = "Откликнуться #"
-LABEL_SHOW_MORE = "Показать еще"
+LABEL_SHOW_MORE = "➡️ Показать еще"
 
 user_sessions: Dict[str, Dict[str, Any]] = {}
 
@@ -73,7 +73,7 @@ def chunk_buttons(buttons: list[dict[str, Any]], row_size: int = MAX_BUTTONS_PER
 def main_menu_keyboard() -> list[dict[str, Any]]:
     return make_keyboard(
         [
-            [request_geo_button("Быстрый поиск по гео")],
+            [request_geo_button("📍 Быстрый поиск по гео")],
             [message_button(LABEL_SEARCH, ACTION_SEARCH)],
         ]
     )
@@ -86,7 +86,7 @@ def cancel_keyboard() -> list[dict[str, Any]]:
 def phone_keyboard() -> list[dict[str, Any]]:
     return make_keyboard(
         [
-            [request_contact_button("Отправить телефон")],
+            [request_contact_button("📞 Отправить телефон")],
             [message_button(LABEL_CANCEL, ACTION_CANCEL)],
         ]
     )
@@ -257,10 +257,10 @@ def format_vacancy(vacancy: Dict[str, Any], index: Optional[int] = None) -> str:
 def send_welcome(user_id: str) -> None:
     send_message(
         user_id,
-        "Привет! Я помогу найти вакансии.\n\n"
+        "👋 Привет! Я помогу найти вакансии.\n\n"
         "Используйте кнопки ниже:\n"
-        "• быстрый поиск по геолокации\n"
-        "• поиск по городу и должности",
+        "📍 быстрый поиск по геолокации\n"
+        "🔎 поиск по городу и должности",
         attachments=main_menu_keyboard(),
     )
 
@@ -272,7 +272,7 @@ def send_vacancy_list(user_id: str, session: Dict[str, Any], vacancies: list[Dic
     if not vacancies:
         send_message(
             user_id,
-            "По вашему запросу вакансий не найдено.",
+            "🔎 По вашему запросу вакансий не найдено.",
             attachments=main_menu_keyboard(),
         )
         return
@@ -288,10 +288,10 @@ def send_next_results_page(user_id: str, session: Dict[str, Any]) -> None:
     if start == 0:
         send_message(
             user_id,
-            f"Нашел {len(vacancies)} вакансий. Ниже карточки с кнопками отклика.",
+            f"✅ Нашел {len(vacancies)} вакансий. Ниже карточки с кнопками отклика.",
         )
     else:
-        send_message(user_id, f"Показываю вакансии {start + 1}-{end} из {len(vacancies)}.")
+        send_message(user_id, f"➡️ Показываю вакансии {start + 1}-{end} из {len(vacancies)}.")
 
     for index in range(start, end):
         vacancy = vacancies[index]
@@ -307,13 +307,13 @@ def send_next_results_page(user_id: str, session: Dict[str, Any]) -> None:
     if end < len(vacancies):
         send_message(
             user_id,
-            f"Показаны {end} из {len(vacancies)} вакансий.",
+            f"📋 Показаны {end} из {len(vacancies)} вакансий.",
             attachments=show_more_keyboard(),
         )
     else:
         send_message(
             user_id,
-            "Это все найденные вакансии.",
+            "✅ Это все найденные вакансии.",
             attachments=main_menu_keyboard(),
         )
 
@@ -327,9 +327,9 @@ def start_questionnaire(user_id: str, session: Dict[str, Any], selected_vacancy:
 
     send_message(
         user_id,
-        "Отклик на вакансию:\n"
+        "✅ Отклик на вакансию:\n"
         f"{selected_vacancy['title']}\n\n"
-        "Введите ваш город:",
+        "🏙 Введите ваш город:",
         attachments=cancel_keyboard(),
     )
 
@@ -349,8 +349,8 @@ def complete_response(user_id: str, session: Dict[str, Any]) -> None:
     reset_dialog(session)
     send_message(
         user_id,
-        f"Спасибо! Ваш отклик на вакансию {title} сохранен.\n"
-        "С вами в ближайшее время свяжется специалист отдела подбора, ожидайте звонка.",
+        f"✅ Спасибо! Ваш отклик на вакансию {title} сохранен.\n"
+        "📞 С вами в ближайшее время свяжется специалист отдела подбора, ожидайте звонка.",
         attachments=main_menu_keyboard(),
     )
 
@@ -456,8 +456,8 @@ def begin_search_flow(user_id: str, session: Dict[str, Any]) -> None:
     session["result_offset"] = 0
     send_message(
         user_id,
-        "Введите город для поиска вакансий.\n"
-        "Если город не важен, нажмите кнопку ниже.",
+        "🏙 Введите город для поиска вакансий.\n"
+        "🌍 Если город не важен, нажмите кнопку ниже.",
         attachments=make_keyboard(
             [
                 [message_button(LABEL_SKIP_CITY, ACTION_SKIP_CITY)],
@@ -484,7 +484,7 @@ def ask_for_title(user_id: str, session: Dict[str, Any]) -> None:
     session["state"] = "waiting_search_title"
     send_message(
         user_id,
-        "Выберите должность из списка.",
+        "💼 Выберите должность из списка.",
         attachments=title_keyboard(titles),
     )
 
@@ -492,7 +492,7 @@ def ask_for_title(user_id: str, session: Dict[str, Any]) -> None:
 def handle_stateful_input(user_id: str, text: str, session: Dict[str, Any]) -> bool:
     if session["state"] == "waiting_search_city":
         if len(text) < 2:
-            send_message(user_id, "Введите корректный город или нажмите 'Любой город'.")
+            send_message(user_id, "⚠️ Введите корректный город или нажмите 'Любой город'.")
             return True
         session["search_city"] = text
         ask_for_title(user_id, session)
@@ -510,38 +510,38 @@ def handle_stateful_input(user_id: str, text: str, session: Dict[str, Any]) -> b
             send_vacancy_list(user_id, session, vacancies)
             return True
 
-        send_message(user_id, "Выберите должность кнопкой из списка.")
+        send_message(user_id, "💼 Выберите должность кнопкой из списка.")
         return True
 
     if session["state"] == "waiting_applicant_city":
         if len(text) < 2:
-            send_message(user_id, "Введите корректный город.")
+            send_message(user_id, "⚠️ Введите корректный город.")
             return True
         session["questionnaire"]["applicant_city"] = text
         session["state"] = "waiting_full_name"
         send_message(
             user_id,
-            "Введите ФИО:",
+            "👤 Введите ФИО:",
             attachments=cancel_keyboard(),
         )
         return True
 
     if session["state"] == "waiting_full_name":
         if len(text) < 5 or len(text.split()) < 2:
-            send_message(user_id, "Пожалуйста, введите корректные ФИО.")
+            send_message(user_id, "⚠️ Пожалуйста, введите корректные ФИО.")
             return True
         session["questionnaire"]["full_name"] = text
         session["state"] = "waiting_phone"
         send_message(
             user_id,
-            "Отправьте телефон кнопкой ниже или введите номер вручную.",
+            "📞 Отправьте телефон кнопкой ниже или введите номер вручную.",
             attachments=phone_keyboard(),
         )
         return True
 
     if session["state"] == "waiting_phone":
         if not is_valid_phone(text):
-            send_message(user_id, "Введите корректный номер телефона.")
+            send_message(user_id, "⚠️ Введите корректный номер телефона.")
             return True
         session["questionnaire"]["phone"] = normalize_phone(text)
         complete_response(user_id, session)
@@ -559,7 +559,7 @@ def try_handle_action(user_id: str, action: str, session: Dict[str, Any]) -> boo
         reset_dialog(session)
         send_message(
             user_id,
-            "Текущий сценарий сброшен.",
+            "✅ Текущий сценарий сброшен.",
             attachments=main_menu_keyboard(),
         )
         return True
@@ -568,7 +568,7 @@ def try_handle_action(user_id: str, action: str, session: Dict[str, Any]) -> boo
         reset_dialog(session)
         send_message(
             user_id,
-            "Вернул вас в главное меню.",
+            "🏠 Вернул вас в главное меню.",
             attachments=main_menu_keyboard(),
         )
         return True
@@ -591,10 +591,10 @@ def try_handle_action(user_id: str, action: str, session: Dict[str, Any]) -> boo
 
     if action == ACTION_SHOW_MORE:
         if not session["all_results"]:
-            send_message(user_id, "Сначала выполните поиск вакансий.")
+            send_message(user_id, "🔎 Сначала выполните поиск вакансий.")
             return True
         if session["result_offset"] >= len(session["all_results"]):
-            send_message(user_id, "Больше вакансий нет.", attachments=main_menu_keyboard())
+            send_message(user_id, "✅ Больше вакансий нет.", attachments=main_menu_keyboard())
             return True
         send_next_results_page(user_id, session)
         return True
@@ -616,17 +616,17 @@ def try_handle_action(user_id: str, action: str, session: Dict[str, Any]) -> boo
 
     if action.startswith(RESPOND_PREFIX):
         if not session["all_results"]:
-            send_message(user_id, "Сначала получите список вакансий.")
+            send_message(user_id, "🔎 Сначала получите список вакансий.")
             return True
 
         try:
             index = int(action.split(":", 1)[1]) - 1
         except ValueError:
-            send_message(user_id, "Не удалось определить выбранную вакансию.")
+            send_message(user_id, "⚠️ Не удалось определить выбранную вакансию.")
             return True
 
         if index < 0 or index >= len(session["all_results"]):
-            send_message(user_id, "Нет вакансии с таким номером.")
+            send_message(user_id, "🔎 Нет вакансии с таким номером.")
             return True
 
         start_questionnaire(user_id, session, session["all_results"][index])
@@ -680,7 +680,7 @@ def handle_contact(user_id: str, attachments: list[dict[str, Any]], session: Dic
 
     phone = parse_contact_phone(attachments)
     if not phone or not is_valid_phone(phone):
-        send_message(user_id, "Не удалось прочитать номер телефона, введите его вручную.")
+        send_message(user_id, "⚠️ Не удалось прочитать номер телефона, введите его вручную.")
         return True
 
     session["questionnaire"]["phone"] = normalize_phone(phone)
@@ -705,7 +705,7 @@ def handle_text_message(user_id: str, text: str, attachments: list[dict[str, Any
     if not text:
         send_message(
             user_id,
-            "Нажмите кнопку меню или отправьте текстовый запрос.",
+            "🏠 Нажмите кнопку меню или отправьте текстовый запрос.",
             attachments=main_menu_keyboard(),
         )
         return
@@ -729,14 +729,14 @@ def handle_text_message(user_id: str, text: str, attachments: list[dict[str, Any
         reset_dialog(session)
         send_message(
             user_id,
-            "Текущий сценарий сброшен.",
+            "✅ Текущий сценарий сброшен.",
             attachments=main_menu_keyboard(),
         )
         return
 
     send_message(
         user_id,
-        "Не понял запрос. Используйте кнопки ниже или /start для возврата в меню.",
+        "⚠️ Не понял запрос. Используйте кнопки ниже или /start для возврата в меню.",
         attachments=main_menu_keyboard(),
     )
 
