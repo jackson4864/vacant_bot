@@ -564,9 +564,19 @@ def seed_known_vacancies() -> None:
 def notify_new_vacancy(vacancy: Dict[str, Any]) -> None:
     city = str(vacancy.get("city") or "").strip()
     if not city:
+        print("VACANCY NOTIFY SKIP: empty city", vacancy.get("title"))
         return
 
     profiles = get_user_profiles_by_city("max", city)
+    print(
+        "VACANCY NOTIFY MATCH:",
+        "city=",
+        city,
+        "title=",
+        vacancy.get("title"),
+        "profiles=",
+        len(profiles),
+    )
     if not profiles:
         return
 
@@ -582,11 +592,21 @@ def notify_new_vacancy(vacancy: Dict[str, Any]) -> None:
             message_text,
             attachments=direct_vacancy_actions_keyboard(local_vacancy_id),
         )
+        print(
+            "VACANCY NOTIFY SENT:",
+            "user_id=",
+            profile["external_user_id"],
+            "city=",
+            city,
+            "title=",
+            vacancy.get("title"),
+        )
 
 
 def check_new_vacancies() -> None:
     known = get_known_external_vacancy_keys(VACANCY_NOTIFY_SOURCE)
     vacancies = get_vacancies()
+    print("VACANCY NOTIFY CHECK:", "known=", len(known), "api=", len(vacancies))
     if not known:
         keys = [vacancy_key(vacancy) for vacancy in vacancies]
         save_known_external_vacancy_keys(VACANCY_NOTIFY_SOURCE, keys)
@@ -598,6 +618,15 @@ def check_new_vacancies() -> None:
         if key in known:
             continue
 
+        print(
+            "VACANCY NOTIFY NEW:",
+            "city=",
+            vacancy.get("city"),
+            "title=",
+            vacancy.get("title"),
+            "address=",
+            vacancy.get("address"),
+        )
         notify_new_vacancy(vacancy)
         save_known_external_vacancy_key(VACANCY_NOTIFY_SOURCE, key)
         known.add(key)
@@ -1302,12 +1331,17 @@ def main() -> None:
     create_tables()
     seed_known_vacancies()
     marker = None
-    last_vacancy_check = time.time()
+    last_vacancy_check = 0.0
 
     print("MAX bot started")
 
     while True:
         try:
+            now = time.time()
+            if now - last_vacancy_check >= VACANCY_NOTIFY_INTERVAL_SECONDS:
+                check_new_vacancies()
+                last_vacancy_check = now
+
             data = get_updates(marker)
 
             if data.get("marker"):
@@ -1315,11 +1349,6 @@ def main() -> None:
 
             for update in data.get("updates", []):
                 handle_update(update)
-
-            now = time.time()
-            if now - last_vacancy_check >= VACANCY_NOTIFY_INTERVAL_SECONDS:
-                check_new_vacancies()
-                last_vacancy_check = now
 
         except ReadTimeout:
             pass
