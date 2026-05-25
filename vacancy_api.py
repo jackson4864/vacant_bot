@@ -12,21 +12,51 @@ from config import (
 API_URL = SHEETDB_API_URL
 
 
-def _normalize_vacancy(vacancy):
-    latitude = vacancy.get("latitude")
-    longitude = vacancy.get("longitude")
+def _get_value(row: dict, *names: str):
+    for name in names:
+        if name in row:
+            return row.get(name)
 
-    if not latitude or not longitude:
+    normalized_names = {name.lower(): name for name in names}
+    for key, value in row.items():
+        if str(key).strip().lower() in normalized_names:
+            return value
+
+    return None
+
+
+def _normalize_vacancy(vacancy):
+    normalized = dict(vacancy)
+
+    field_aliases = {
+        "vacancy_id": ("vacancy_id", "id", "external_id"),
+        "project": ("project",),
+        "region": ("region",),
+        "city": ("city",),
+        "title": ("title",),
+        "description": ("description",),
+        "description_2": ("description_2", "description 2"),
+        "address": ("address",),
+        "maps": ("maps", "map", "карта"),
+        "payment": ("payment", "salary", "оплата"),
+    }
+
+    for field, aliases in field_aliases.items():
+        value = _get_value(vacancy, field, *aliases)
+        normalized[field] = str(value).strip() if value is not None else ""
+
+    if not normalized["title"]:
         return None
 
-    normalized = dict(vacancy)
-    normalized["latitude"] = float(latitude)
-    normalized["longitude"] = float(longitude)
+    latitude = _get_value(vacancy, "latitude", "lat", "широта")
+    longitude = _get_value(vacancy, "longitude", "lon", "lng", "долгота")
 
-    for field in ("project", "region", "city", "title", "description", "description_2", "address", "maps", "payment"):
-        value = normalized.get(field)
-        if value is not None:
-            normalized[field] = str(value).strip()
+    try:
+        normalized["latitude"] = float(latitude) if latitude not in (None, "") else 0.0
+        normalized["longitude"] = float(longitude) if longitude not in (None, "") else 0.0
+    except (TypeError, ValueError):
+        normalized["latitude"] = 0.0
+        normalized["longitude"] = 0.0
 
     return normalized
 
