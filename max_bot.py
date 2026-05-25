@@ -1,3 +1,4 @@
+import hashlib
 import re
 import time
 from pathlib import Path
@@ -6,12 +7,17 @@ from typing import Any, Dict, Optional
 import requests
 from requests.exceptions import ReadTimeout, RequestException
 
-from config import MAX_BOT_TOKEN, SEARCH_RADIUS_KM
+from config import MAX_BOT_TOKEN, SEARCH_RADIUS_KM, VACANCY_NOTIFY_INTERVAL_SECONDS
 from db import (
     create_tables,
     delete_user_data,
+    get_vacancy_by_id,
+    get_known_external_vacancy_keys,
     get_user_profile,
+    get_user_profiles_by_city,
     save_response,
+    save_known_external_vacancy_key,
+    save_known_external_vacancy_keys,
     save_user_profile,
     upsert_vacancy,
 )
@@ -40,6 +46,8 @@ ACTION_EDIT_FULL_NAME = "action:edit_full_name"
 ACTION_EDIT_PHONE = "action:edit_phone"
 TITLE_PREFIX = "title:"
 RESPOND_PREFIX = "respond:"
+RESPOND_VACANCY_PREFIX = "respond_vacancy:"
+VACANCY_NOTIFY_SOURCE = "max_vacancy_api"
 LABEL_SEARCH = "🔎 Поиск по городу и должности"
 LABEL_CANCEL = "❌ Отмена"
 LABEL_MENU = "🏠 В меню"
@@ -53,6 +61,7 @@ LABEL_EDIT_PHONE = "📞 Телефон"
 LABEL_SKIP_CITY = "🌍 Любой город"
 LABEL_SKIP_TITLE = "💼 Любая должность"
 LABEL_RESPOND_PREFIX = "Откликнуться #"
+LABEL_DIRECT_RESPOND_PREFIX = "✅ Откликнуться #"
 LABEL_SHOW_MORE = "➡️ Показать еще"
 CONSENT_TEXT = (
     "Даю согласие на обработку моих персональных данных: города, ФИО и телефона "
@@ -155,6 +164,20 @@ def vacancy_actions_keyboard(index: int) -> list[dict[str, Any]]:
     return make_keyboard(
         [
             [message_button(f"{LABEL_RESPOND_PREFIX}{index}", f"{RESPOND_PREFIX}{index}")],
+            [message_button(LABEL_MENU, ACTION_BACK_TO_MENU)],
+        ]
+    )
+
+
+def direct_vacancy_actions_keyboard(vacancy_id: int) -> list[dict[str, Any]]:
+    return make_keyboard(
+        [
+            [
+                message_button(
+                    f"{LABEL_DIRECT_RESPOND_PREFIX}{vacancy_id}",
+                    f"{RESPOND_VACANCY_PREFIX}{vacancy_id}",
+                )
+            ],
             [message_button(LABEL_MENU, ACTION_BACK_TO_MENU)],
         ]
     )
@@ -307,6 +330,7 @@ def get_session(user_id: str) -> Dict[str, Any]:
             "selected_vacancy_id": None,
             "selected_vacancy_title": None,
             "pending_response_index": None,
+            "pending_response_vacancy_id": None,
             "questionnaire": {},
         },
     )
@@ -322,6 +346,7 @@ def reset_dialog(session: Dict[str, Any]) -> None:
     session["selected_vacancy_id"] = None
     session["selected_vacancy_title"] = None
     session["pending_response_index"] = None
+    session["pending_response_vacancy_id"] = None
     session["questionnaire"] = {}
 
 
@@ -510,6 +535,74 @@ def send_next_results_page(user_id: str, session: Dict[str, Any]) -> None:
         )
 
 
+def vacancy_key(vacancy: Dict[str, Any]) -> str:
+    parts = [
+        vacancy.get("project") or "",
+        vacancy.get("region") or "",
+        vacancy.get("city") or "",
+        vacancy.get("title") or "",
+        vacancy.get("address") or "",
+        str(vacancy.get("latitude") or ""),
+        str(vacancy.get("longitude") or ""),
+    ]
+    raw = "|".join(str(part).strip().lower() for part in parts)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def seed_known_vacancies() -> None:
+    known = get_known_external_vacancy_keys(VACANCY_NOTIFY_SOURCE)
+    if known:
+        print("VACANCY NOTIFY KNOWN:", len(known))
+        return
+
+    vacancies = get_vacancies()
+    keys = [vacancy_key(vacancy) for vacancy in vacancies]
+    save_known_external_vacancy_keys(VACANCY_NOTIFY_SOURCE, keys)
+    print("VACANCY NOTIFY SEED:", len(keys))
+
+
+def notify_new_vacancy(vacancy: Dict[str, Any]) -> None:
+    city = str(vacancy.get("city") or "").strip()
+    if not city:
+        return
+
+    profiles = get_user_profiles_by_city("max", city)
+    if not profiles:
+        return
+
+    local_vacancy_id = upsert_vacancy(vacancy)
+    message_text = (
+        f"🔔 Открыта новая вакансия в городе {city}.\n\n"
+        f"{format_vacancy(vacancy)}"
+    )
+
+    for profile in profiles:
+        send_message(
+            str(profile["external_user_id"]),
+            message_text,
+            attachments=direct_vacancy_actions_keyboard(local_vacancy_id),
+        )
+
+
+def check_new_vacancies() -> None:
+    known = get_known_external_vacancy_keys(VACANCY_NOTIFY_SOURCE)
+    vacancies = get_vacancies()
+    if not known:
+        keys = [vacancy_key(vacancy) for vacancy in vacancies]
+        save_known_external_vacancy_keys(VACANCY_NOTIFY_SOURCE, keys)
+        print("VACANCY NOTIFY SEED DURING CHECK:", len(keys))
+        return
+
+    for vacancy in vacancies:
+        key = vacancy_key(vacancy)
+        if key in known:
+            continue
+
+        notify_new_vacancy(vacancy)
+        save_known_external_vacancy_key(VACANCY_NOTIFY_SOURCE, key)
+        known.add(key)
+
+
 def start_questionnaire(user_id: str, session: Dict[str, Any], selected_vacancy: Dict[str, Any]) -> None:
     profile = get_max_profile(user_id)
     if not profile:
@@ -577,9 +670,11 @@ def complete_registration(user_id: str, session: Dict[str, Any]) -> None:
         consent_text=questionnaire.get("consent_text") or CONSENT_TEXT,
     )
     pending_response_index = session.get("pending_response_index")
+    pending_response_vacancy_id = session.get("pending_response_vacancy_id")
     session["state"] = None
     session["questionnaire"] = {}
     session["pending_response_index"] = None
+    session["pending_response_vacancy_id"] = None
 
     send_message(
         user_id,
@@ -590,6 +685,12 @@ def complete_registration(user_id: str, session: Dict[str, Any]) -> None:
     if pending_response_index is not None and session["all_results"]:
         if 0 <= pending_response_index < len(session["all_results"]):
             start_questionnaire(user_id, session, session["all_results"][pending_response_index])
+            return
+
+    if pending_response_vacancy_id is not None:
+        vacancy = get_vacancy_by_id(pending_response_vacancy_id)
+        if vacancy:
+            start_questionnaire(user_id, session, vacancy)
 
 
 def save_profile_field(user_id: str, session: Dict[str, Any], field_name: str, value: str) -> None:
@@ -730,6 +831,10 @@ def extract_action_token(text: str, payload: Any) -> str:
         index = normalized_text.removeprefix(LABEL_RESPOND_PREFIX).strip()
         if index.isdigit():
             return f"{RESPOND_PREFIX}{index}"
+    if normalized_text.startswith(LABEL_DIRECT_RESPOND_PREFIX):
+        vacancy_id = normalized_text.removeprefix(LABEL_DIRECT_RESPOND_PREFIX).strip()
+        if vacancy_id.isdigit():
+            return f"{RESPOND_VACANCY_PREFIX}{vacancy_id}"
 
     return normalized_text
 
@@ -1009,6 +1114,26 @@ def try_handle_action(user_id: str, action: str, session: Dict[str, Any]) -> boo
         send_vacancy_list(user_id, session, vacancies)
         return True
 
+    if action.startswith(RESPOND_VACANCY_PREFIX):
+        try:
+            vacancy_id = int(action.split(":", 1)[1])
+        except ValueError:
+            send_message(user_id, "⚠️ Не удалось определить выбранную вакансию.")
+            return True
+
+        vacancy = get_vacancy_by_id(vacancy_id)
+        if not vacancy:
+            send_message(user_id, "🔎 Вакансия не найдена.")
+            return True
+
+        if not get_max_profile(user_id):
+            session["pending_response_vacancy_id"] = vacancy_id
+            send_registration_intro(user_id)
+            return True
+
+        start_questionnaire(user_id, session, vacancy)
+        return True
+
     if action.startswith(RESPOND_PREFIX):
         if not session["all_results"]:
             send_message(user_id, "🔎 Сначала получите список вакансий.")
@@ -1175,7 +1300,9 @@ def handle_update(update: Dict[str, Any]) -> None:
 
 def main() -> None:
     create_tables()
+    seed_known_vacancies()
     marker = None
+    last_vacancy_check = time.time()
 
     print("MAX bot started")
 
@@ -1188,6 +1315,11 @@ def main() -> None:
 
             for update in data.get("updates", []):
                 handle_update(update)
+
+            now = time.time()
+            if now - last_vacancy_check >= VACANCY_NOTIFY_INTERVAL_SECONDS:
+                check_new_vacancies()
+                last_vacancy_check = now
 
         except ReadTimeout:
             pass

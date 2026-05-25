@@ -121,6 +121,20 @@ def create_tables() -> None:
         ON user_profiles(source_platform, external_user_id)
         """)
 
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS external_vacancy_keys (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_platform TEXT NOT NULL,
+            vacancy_key TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(source_platform, vacancy_key)
+        )
+        """)
+        cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_external_vacancy_keys_source
+        ON external_vacancy_keys(source_platform)
+        """)
+
         conn.commit()
 
 
@@ -498,6 +512,65 @@ def get_user_profile(
         ).fetchone()
 
     return dict(row) if row else None
+
+
+def get_user_profiles_by_city(
+    source_platform: str,
+    city: str,
+) -> List[Dict[str, Any]]:
+    normalized_city = city.strip().lower()
+    with closing(get_connection()) as conn:
+        rows = conn.execute(
+            """
+            SELECT * FROM user_profiles
+            WHERE source_platform = ?
+              AND LOWER(TRIM(applicant_city)) = ?
+            ORDER BY updated_at, id
+            """,
+            (source_platform, normalized_city),
+        ).fetchall()
+
+    return [dict(row) for row in rows]
+
+
+def get_known_external_vacancy_keys(source_platform: str) -> set[str]:
+    with closing(get_connection()) as conn:
+        rows = conn.execute(
+            """
+            SELECT vacancy_key FROM external_vacancy_keys
+            WHERE source_platform = ?
+            """,
+            (source_platform,),
+        ).fetchall()
+
+    return {row["vacancy_key"] for row in rows}
+
+
+def save_known_external_vacancy_key(source_platform: str, vacancy_key: str) -> None:
+    with closing(get_connection()) as conn:
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO external_vacancy_keys (source_platform, vacancy_key)
+            VALUES (?, ?)
+            """,
+            (source_platform, vacancy_key),
+        )
+        conn.commit()
+
+
+def save_known_external_vacancy_keys(source_platform: str, vacancy_keys: List[str]) -> None:
+    if not vacancy_keys:
+        return
+
+    with closing(get_connection()) as conn:
+        conn.executemany(
+            """
+            INSERT OR IGNORE INTO external_vacancy_keys (source_platform, vacancy_key)
+            VALUES (?, ?)
+            """,
+            [(source_platform, vacancy_key) for vacancy_key in vacancy_keys],
+        )
+        conn.commit()
 
 
 def save_user_profile(
