@@ -536,6 +536,10 @@ def send_next_results_page(user_id: str, session: Dict[str, Any]) -> None:
 
 
 def vacancy_key(vacancy: Dict[str, Any]) -> str:
+    vacancy_id = str(vacancy.get("vacancy_id") or "").strip()
+    if vacancy_id:
+        return f"id:{vacancy_id.lower()}"
+
     parts = [
         vacancy.get("project") or "",
         vacancy.get("region") or "",
