@@ -118,6 +118,12 @@ def append_sheet_row(row: dict, sheet_name: Optional[str] = SHEETDB_RESPONSES_SH
         return False
 
     if 200 <= response.status_code < 300:
+        print(
+            "SHEETDB APPEND OK:",
+            row.get("record_type", "unknown"),
+            "sheet=",
+            sheet_name,
+        )
         return True
 
     print(
