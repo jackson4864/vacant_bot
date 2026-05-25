@@ -284,6 +284,7 @@ def append_profile_to_sheet(user_id: str, profile: Dict[str, Any]) -> None:
             "source_platform": "max",
             "external_user_id": user_id,
             "applicant_city": profile["applicant_city"],
+            "city": profile["applicant_city"],
             "full_name": profile["full_name"],
             "phone": profile["phone"],
             "consent_given": "yes" if profile.get("consent_given") else "no",
@@ -304,6 +305,7 @@ def append_response_to_sheet(
             "source_platform": "max",
             "external_user_id": user_id,
             "applicant_city": profile["applicant_city"],
+            "city": profile["applicant_city"],
             "full_name": profile["full_name"],
             "phone": profile["phone"],
             "vacancy_region": vacancy.get("region") or "",
@@ -311,6 +313,8 @@ def append_response_to_sheet(
             "vacancy_title": vacancy.get("title") or "",
             "vacancy_address": vacancy.get("address") or "",
             "vacancy_project": vacancy.get("project") or "",
+            "vacancy": vacancy.get("title") or "",
+            "address": vacancy.get("address") or "",
         }
     )
 
