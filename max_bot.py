@@ -35,6 +35,7 @@ LABEL_SEARCH = "🔎 Поиск по городу и должности"
 LABEL_CANCEL = "❌ Отмена"
 LABEL_MENU = "🏠 В меню"
 LABEL_MY_DATA = "👤 Мои данные"
+LABEL_REGISTER = "✅ Согласен"
 LABEL_SKIP_CITY = "🌍 Любой город"
 LABEL_SKIP_TITLE = "💼 Любая должность"
 LABEL_RESPOND_PREFIX = "Откликнуться #"
@@ -96,7 +97,7 @@ def main_menu_keyboard() -> list[dict[str, Any]]:
 def consent_keyboard() -> list[dict[str, Any]]:
     return make_keyboard(
         [
-            [message_button("✅ Согласен", ACTION_REGISTER)],
+            [message_button(LABEL_REGISTER, ACTION_REGISTER)],
             [message_button(LABEL_CANCEL, ACTION_CANCEL)],
         ]
     )
@@ -264,8 +265,13 @@ def send_registration_intro(user_id: str) -> None:
         "Нужно будет указать:\n"
         "🏙 город\n"
         "👤 ФИО\n"
-        "📞 телефон для связи\n\n"
-        f"Нажимая «Согласен», вы подтверждаете: {CONSENT_TEXT}",
+        "📞 телефон для связи",
+    )
+    send_message(
+        user_id,
+        "📄 Согласие на обработку персональных данных\n\n"
+        f"{CONSENT_TEXT}\n\n"
+        "Если согласны, нажмите кнопку ниже.",
         attachments=consent_keyboard(),
     )
 
@@ -572,6 +578,10 @@ def extract_action_token(text: str, payload: Any) -> str:
         return ACTION_CANCEL
     if normalized_text == LABEL_MENU:
         return ACTION_BACK_TO_MENU
+    if normalized_text == LABEL_MY_DATA:
+        return ACTION_MY_DATA
+    if normalized_text == LABEL_REGISTER:
+        return ACTION_REGISTER
     if normalized_text == LABEL_SKIP_CITY:
         return ACTION_SKIP_CITY
     if normalized_text == LABEL_SKIP_TITLE:
