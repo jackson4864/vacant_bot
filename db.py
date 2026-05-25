@@ -524,13 +524,16 @@ def get_user_profiles_by_city(
             """
             SELECT * FROM user_profiles
             WHERE source_platform = ?
-              AND LOWER(TRIM(applicant_city)) = ?
             ORDER BY updated_at, id
             """,
-            (source_platform, normalized_city),
+            (source_platform,),
         ).fetchall()
 
-    return [dict(row) for row in rows]
+    return [
+        dict(row)
+        for row in rows
+        if str(row["applicant_city"]).strip().lower() == normalized_city
+    ]
 
 
 def get_known_external_vacancy_keys(source_platform: str) -> set[str]:
