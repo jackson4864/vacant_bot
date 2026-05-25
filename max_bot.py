@@ -224,10 +224,11 @@ def upload_file_attachment(file_path: Path) -> Optional[dict[str, Any]]:
         with file_path.open("rb") as file:
             file_response = requests.post(
                 upload_url,
-                headers={"Authorization": token},
                 files={"data": (file_path.name, file)},
                 timeout=60,
             )
+        if not file_response.ok:
+            print("MAX FILE UPLOAD RESPONSE:", file_response.status_code, file_response.text)
         file_response.raise_for_status()
     except RequestException as exc:
         print("MAX FILE UPLOAD ERROR:", exc)
