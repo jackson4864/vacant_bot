@@ -23,6 +23,7 @@ MAX_RESULTS = 5
 BOT_LABEL = "[MAX v2]"
 MAX_BUTTONS_PER_ROW = 2
 CONSENT_DOC_PATH = Path(__file__).with_name("personal_data_consent_merch_bot.docx")
+DOCX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
 ACTION_SEARCH = "action:search"
 ACTION_CANCEL = "action:cancel"
@@ -221,15 +222,28 @@ def upload_file_attachment(file_path: Path) -> Optional[dict[str, Any]]:
             print("MAX FILE UPLOAD FAILED: upload url missing", upload_response.text)
             return None
 
-        with file_path.open("rb") as file:
-            file_response = requests.post(
-                upload_url,
-                files={"data": (file_path.name, file)},
-                timeout=60,
+        file_response = None
+        for field_name in ("data", "file"):
+            with file_path.open("rb") as file:
+                file_response = requests.post(
+                    upload_url,
+                    files={field_name: (file_path.name, file, DOCX_MIME_TYPE)},
+                    timeout=60,
+                )
+            if file_response.ok:
+                break
+            print(
+                "MAX FILE UPLOAD RESPONSE:",
+                field_name,
+                file_response.status_code,
+                file_response.text,
             )
+
+        if file_response is None:
+            print("MAX FILE UPLOAD FAILED: no upload attempt")
+            return None
         if not file_response.ok:
-            print("MAX FILE UPLOAD RESPONSE:", file_response.status_code, file_response.text)
-        file_response.raise_for_status()
+            file_response.raise_for_status()
     except RequestException as exc:
         print("MAX FILE UPLOAD ERROR:", exc)
         return None
