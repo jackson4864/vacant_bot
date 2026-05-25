@@ -552,12 +552,6 @@ async def main_my_data_callback(callback: CallbackQuery) -> None:
     await callback.answer()
 
 
-@dp.callback_query(F.data == "main:consent_doc")
-async def main_consent_doc_callback(callback: CallbackQuery) -> None:
-    await send_consent_document(callback.message)
-    await callback.answer()
-
-
 @dp.message(F.text == CATALOG_BUTTON_TEXT)
 async def catalog_button_handler(message: Message, state: FSMContext) -> None:
     await show_regions(message, state)

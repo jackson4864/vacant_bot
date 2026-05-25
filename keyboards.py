@@ -15,7 +15,6 @@ def main_menu_keyboard() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="📍 Быстрый поиск по гео", callback_data="main:geo")],
             [InlineKeyboardButton(text=CATALOG_BUTTON_TEXT, callback_data="main:catalog")],
             [InlineKeyboardButton(text=MY_DATA_BUTTON_TEXT, callback_data="main:my_data")],
-            [InlineKeyboardButton(text="📄 Документ по ПД", callback_data="main:consent_doc")],
         ]
     )
 
