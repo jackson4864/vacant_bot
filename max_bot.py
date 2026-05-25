@@ -196,6 +196,10 @@ def normalize_text(text: Optional[str]) -> str:
     return (text or "").strip()
 
 
+def escape_text(value: object) -> str:
+    return str(value)
+
+
 def normalize_phone(phone: str) -> str:
     phone = phone.strip()
     phone = re.sub(r"[^\d+]", "", phone)
@@ -216,31 +220,36 @@ def is_valid_phone(phone: str) -> bool:
 
 
 def format_vacancy(vacancy: Dict[str, Any], index: Optional[int] = None) -> str:
-    lines = []
-    title = str(vacancy.get("title") or "Вакансия")
-    lines.append(f"{index}. {title}" if index is not None else title)
+    title = vacancy.get("title") or "Вакансия"
+    title_prefix = f"{index}. " if index is not None else ""
+    lines = [f"💼 {title_prefix}{escape_text(title)}"]
 
     if vacancy.get("project"):
-        lines.append(str(vacancy["project"]))
+        lines.append(f"🏢 Проект: {escape_text(vacancy['project'])}")
     if vacancy.get("region") or vacancy.get("city"):
         location = " / ".join(
             str(value)
             for value in (vacancy.get("region"), vacancy.get("city"))
             if value
         )
-        lines.append(f"Локация: {location}")
+        lines.append(f"🏙 Локация: {location}")
     if vacancy.get("address"):
-        lines.append(f"Адрес: {vacancy['address']}")
+        lines.append(f"📍 Адрес: {escape_text(vacancy['address'])}")
     if vacancy.get("payment"):
-        lines.append(f"Оплата: {vacancy['payment']}")
+        lines.append(f"💰 Оплата: {escape_text(vacancy['payment'])}")
     if vacancy.get("distance") is not None:
-        lines.append(f"Расстояние: {vacancy['distance']} км")
+        lines.append(f"📏 Расстояние: {escape_text(vacancy['distance'])} км")
+
+    description_lines = []
     if vacancy.get("description"):
-        lines.append(str(vacancy["description"]))
+        description_lines.append(escape_text(vacancy["description"]))
     if vacancy.get("description_2"):
-        lines.append(str(vacancy["description_2"]))
-    if vacancy.get("maps"):
-        lines.append(f"Карта: {vacancy['maps']}")
+        description_lines.append(escape_text(vacancy["description_2"]))
+
+    if description_lines:
+        lines.append("")
+        lines.append("📝 Описание:")
+        lines.extend(description_lines)
 
     return "\n".join(lines)
 
