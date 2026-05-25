@@ -113,7 +113,18 @@ def append_sheet_row(row: dict, sheet_name: Optional[str] = SHEETDB_RESPONSES_SH
             json={"data": row},
             timeout=30,
         )
-    except RequestException:
+    except RequestException as exc:
+        print(f"SHEETDB APPEND ERROR: {exc}")
         return False
 
-    return 200 <= response.status_code < 300
+    if 200 <= response.status_code < 300:
+        return True
+
+    print(
+        "SHEETDB APPEND FAILED:",
+        response.status_code,
+        response.text,
+        "sheet=",
+        sheet_name,
+    )
+    return False

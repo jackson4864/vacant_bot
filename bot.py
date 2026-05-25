@@ -94,8 +94,12 @@ async def send_registration_intro(message: Message) -> None:
         "Нужно будет указать:\n"
         "🏙 город\n"
         "👤 ФИО\n"
-        "📞 телефон для связи\n\n"
-        f"Нажимая «Согласен», вы подтверждаете: {escape_text(CONSENT_TEXT)}",
+        "📞 телефон для связи",
+    )
+    await message.answer(
+        "📄 <b>Согласие на обработку персональных данных</b>\n\n"
+        f"{escape_text(CONSENT_TEXT)}\n\n"
+        "Если согласны, нажмите кнопку ниже.",
         reply_markup=consent_keyboard(),
     )
 
@@ -104,6 +108,7 @@ def append_profile_to_sheet(external_user_id: str, profile: dict) -> None:
     append_sheet_row(
         {
             "record_type": "profile",
+            "created_at": "DATETIME",
             "source_platform": "telegram",
             "external_user_id": external_user_id,
             "applicant_city": profile["applicant_city"],
@@ -119,6 +124,7 @@ def append_response_to_sheet(external_user_id: str, profile: dict, vacancy: dict
     append_sheet_row(
         {
             "record_type": "response",
+            "created_at": "DATETIME",
             "source_platform": "telegram",
             "external_user_id": external_user_id,
             "applicant_city": profile["applicant_city"],

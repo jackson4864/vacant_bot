@@ -280,6 +280,7 @@ def append_profile_to_sheet(user_id: str, profile: Dict[str, Any]) -> None:
     append_sheet_row(
         {
             "record_type": "profile",
+            "created_at": "DATETIME",
             "source_platform": "max",
             "external_user_id": user_id,
             "applicant_city": profile["applicant_city"],
@@ -299,6 +300,7 @@ def append_response_to_sheet(
     append_sheet_row(
         {
             "record_type": "response",
+            "created_at": "DATETIME",
             "source_platform": "max",
             "external_user_id": user_id,
             "applicant_city": profile["applicant_city"],
@@ -596,6 +598,23 @@ def extract_action_token(text: str, payload: Any) -> str:
     return normalized_text
 
 
+def extract_text_value(text: str, payload: Any) -> str:
+    normalized_text = normalize_text(text)
+    if normalized_text:
+        return normalized_text
+
+    if isinstance(payload, str):
+        return normalize_text(payload)
+
+    if isinstance(payload, dict):
+        for key in ("text", "value", "payload"):
+            value = payload.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+
+    return ""
+
+
 def begin_search_flow(user_id: str, session: Dict[str, Any]) -> None:
     session["state"] = "waiting_search_city"
     session["search_city"] = None
@@ -861,16 +880,23 @@ def handle_contact(user_id: str, attachments: list[dict[str, Any]], session: Dic
 
 def handle_text_message(user_id: str, text: str, attachments: list[dict[str, Any]], payload: Any) -> None:
     session = get_session(user_id)
-    text = normalize_text(text)
+    text = extract_text_value(text, payload)
     action = extract_action_token(text, payload)
+
+    if (
+        text
+        and session["state"] in ("waiting_phone", "waiting_profile_phone")
+        and handle_stateful_input(user_id, text, session)
+    ):
+        return
 
     if handle_contact(user_id, attachments, session):
         return
 
-    if handle_geo(user_id, attachments, session):
+    if try_handle_action(user_id, action, session):
         return
 
-    if try_handle_action(user_id, action, session):
+    if handle_geo(user_id, attachments, session):
         return
 
     if not text:
