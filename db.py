@@ -502,6 +502,37 @@ def save_user_profile(
     return profile
 
 
+def delete_user_profile(source_platform: str, external_user_id: str) -> None:
+    with closing(get_connection()) as conn:
+        conn.execute(
+            """
+            DELETE FROM user_profiles
+            WHERE source_platform = ? AND external_user_id = ?
+            """,
+            (source_platform, external_user_id),
+        )
+        conn.commit()
+
+
+def delete_user_data(source_platform: str, external_user_id: str) -> None:
+    with closing(get_connection()) as conn:
+        conn.execute(
+            """
+            DELETE FROM responses
+            WHERE source_platform = ? AND external_user_id = ?
+            """,
+            (source_platform, external_user_id),
+        )
+        conn.execute(
+            """
+            DELETE FROM user_profiles
+            WHERE source_platform = ? AND external_user_id = ?
+            """,
+            (source_platform, external_user_id),
+        )
+        conn.commit()
+
+
 def save_response(
     vacancy_id: int,
     full_name: str,

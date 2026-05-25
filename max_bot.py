@@ -1,5 +1,6 @@
 import re
 import time
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 import requests
@@ -8,6 +9,7 @@ from requests.exceptions import ReadTimeout, RequestException
 from config import MAX_BOT_TOKEN, SEARCH_RADIUS_KM
 from db import (
     create_tables,
+    delete_user_data,
     get_user_profile,
     save_response,
     save_user_profile,
@@ -20,6 +22,7 @@ BASE_URL = "https://platform-api.max.ru"
 MAX_RESULTS = 5
 BOT_LABEL = "[MAX v2]"
 MAX_BUTTONS_PER_ROW = 2
+CONSENT_DOC_PATH = Path(__file__).with_name("personal_data_consent_merch_bot.docx")
 
 ACTION_SEARCH = "action:search"
 ACTION_CANCEL = "action:cancel"
@@ -29,6 +32,11 @@ ACTION_SKIP_TITLE = "action:skip_title"
 ACTION_SHOW_MORE = "action:show_more"
 ACTION_MY_DATA = "action:my_data"
 ACTION_REGISTER = "action:register"
+ACTION_DELETE_DATA = "action:delete_data"
+ACTION_EDIT_DATA = "action:edit_data"
+ACTION_EDIT_CITY = "action:edit_city"
+ACTION_EDIT_FULL_NAME = "action:edit_full_name"
+ACTION_EDIT_PHONE = "action:edit_phone"
 TITLE_PREFIX = "title:"
 RESPOND_PREFIX = "respond:"
 LABEL_SEARCH = "🔎 Поиск по городу и должности"
@@ -36,6 +44,11 @@ LABEL_CANCEL = "❌ Отмена"
 LABEL_MENU = "🏠 В меню"
 LABEL_MY_DATA = "👤 Мои данные"
 LABEL_REGISTER = "✅ Согласен"
+LABEL_DELETE_DATA = "🗑 Удалить данные"
+LABEL_EDIT_DATA = "✏️ Скорректировать данные"
+LABEL_EDIT_CITY = "🏙 Город"
+LABEL_EDIT_FULL_NAME = "👤 ФИО"
+LABEL_EDIT_PHONE = "📞 Телефон"
 LABEL_SKIP_CITY = "🌍 Любой город"
 LABEL_SKIP_TITLE = "💼 Любая должность"
 LABEL_RESPOND_PREFIX = "Откликнуться #"
@@ -90,6 +103,27 @@ def main_menu_keyboard() -> list[dict[str, Any]]:
             [request_geo_button("📍 Быстрый поиск по гео")],
             [message_button(LABEL_SEARCH, ACTION_SEARCH)],
             [message_button(LABEL_MY_DATA, ACTION_MY_DATA)],
+        ]
+    )
+
+
+def profile_actions_keyboard() -> list[dict[str, Any]]:
+    return make_keyboard(
+        [
+            [message_button(LABEL_EDIT_DATA, ACTION_EDIT_DATA)],
+            [message_button(LABEL_DELETE_DATA, ACTION_DELETE_DATA)],
+            [message_button(LABEL_MENU, ACTION_BACK_TO_MENU)],
+        ]
+    )
+
+
+def profile_edit_keyboard() -> list[dict[str, Any]]:
+    return make_keyboard(
+        [
+            [message_button(LABEL_EDIT_CITY, ACTION_EDIT_CITY)],
+            [message_button(LABEL_EDIT_FULL_NAME, ACTION_EDIT_FULL_NAME)],
+            [message_button(LABEL_EDIT_PHONE, ACTION_EDIT_PHONE)],
+            [message_button(LABEL_MENU, ACTION_BACK_TO_MENU)],
         ]
     )
 
@@ -164,6 +198,52 @@ def send_message(
     )
     print("SEND STATUS:", response.status_code)
     print("SEND RESPONSE:", response.text)
+
+
+def upload_file_attachment(file_path: Path) -> Optional[dict[str, Any]]:
+    if not file_path.exists():
+        print("MAX FILE UPLOAD SKIPPED: file not found", file_path)
+        return None
+
+    token = require_max_token()
+    try:
+        upload_response = requests.post(
+            f"{BASE_URL}/uploads",
+            headers={"Authorization": token},
+            params={"type": "file"},
+            timeout=30,
+        )
+        upload_response.raise_for_status()
+        upload_url = upload_response.json().get("url")
+        if not upload_url:
+            print("MAX FILE UPLOAD FAILED: upload url missing", upload_response.text)
+            return None
+
+        with file_path.open("rb") as file:
+            file_response = requests.post(
+                upload_url,
+                files={"data": (file_path.name, file)},
+                timeout=60,
+            )
+        file_response.raise_for_status()
+    except RequestException as exc:
+        print("MAX FILE UPLOAD ERROR:", exc)
+        return None
+
+    payload = file_response.json()
+    return {"type": "file", "payload": payload}
+
+
+def send_personal_data_document(user_id: str) -> None:
+    attachment = upload_file_attachment(CONSENT_DOC_PATH)
+    if not attachment:
+        return
+
+    send_message(
+        user_id,
+        "📎 Документ по обработке персональных данных.",
+        attachments=[attachment],
+    )
 
 
 def get_updates(marker: Optional[str] = None) -> Dict[str, Any]:
@@ -274,6 +354,7 @@ def send_registration_intro(user_id: str) -> None:
         "Если согласны, нажмите кнопку ниже.",
         attachments=consent_keyboard(),
     )
+    send_personal_data_document(user_id)
 
 
 def append_profile_to_sheet(user_id: str, profile: Dict[str, Any]) -> None:
@@ -509,6 +590,42 @@ def complete_registration(user_id: str, session: Dict[str, Any]) -> None:
             start_questionnaire(user_id, session, session["all_results"][pending_response_index])
 
 
+def save_profile_field(user_id: str, session: Dict[str, Any], field_name: str, value: str) -> None:
+    profile = get_max_profile(user_id)
+    if not profile:
+        reset_dialog(session)
+        send_registration_intro(user_id)
+        return
+
+    updated_city = profile["applicant_city"]
+    updated_full_name = profile["full_name"]
+    updated_phone = profile["phone"]
+
+    if field_name == "applicant_city":
+        updated_city = value
+    elif field_name == "full_name":
+        updated_full_name = value
+    elif field_name == "phone":
+        updated_phone = normalize_phone(value)
+
+    updated_profile = save_user_profile(
+        source_platform="max",
+        external_user_id=user_id,
+        applicant_city=updated_city,
+        full_name=updated_full_name,
+        phone=updated_phone,
+        consent_given=True,
+        consent_text=profile.get("consent_text") or CONSENT_TEXT,
+    )
+    session["state"] = None
+    session["questionnaire"] = {}
+    send_message(
+        user_id,
+        "✅ Данные обновлены.\n\n" + format_profile(updated_profile),
+        attachments=profile_actions_keyboard(),
+    )
+
+
 def parse_contact_phone(attachments: list[dict[str, Any]]) -> Optional[str]:
     for attachment in attachments:
         if attachment.get("type") != "contact":
@@ -591,6 +708,16 @@ def extract_action_token(text: str, payload: Any) -> str:
         return ACTION_MY_DATA
     if normalized_text == LABEL_REGISTER:
         return ACTION_REGISTER
+    if normalized_text == LABEL_DELETE_DATA:
+        return ACTION_DELETE_DATA
+    if normalized_text == LABEL_EDIT_DATA:
+        return ACTION_EDIT_DATA
+    if normalized_text == LABEL_EDIT_CITY:
+        return ACTION_EDIT_CITY
+    if normalized_text == LABEL_EDIT_FULL_NAME:
+        return ACTION_EDIT_FULL_NAME
+    if normalized_text == LABEL_EDIT_PHONE:
+        return ACTION_EDIT_PHONE
     if normalized_text == LABEL_SKIP_CITY:
         return ACTION_SKIP_CITY
     if normalized_text == LABEL_SKIP_TITLE:
@@ -722,6 +849,27 @@ def handle_stateful_input(user_id: str, text: str, session: Dict[str, Any]) -> b
         complete_registration(user_id, session)
         return True
 
+    if session["state"] == "waiting_edit_city":
+        if len(text) < 2:
+            send_message(user_id, "⚠️ Введите корректный город.")
+            return True
+        save_profile_field(user_id, session, "applicant_city", text)
+        return True
+
+    if session["state"] == "waiting_edit_full_name":
+        if len(text) < 5 or len(text.split()) < 2:
+            send_message(user_id, "⚠️ Пожалуйста, введите корректные ФИО.")
+            return True
+        save_profile_field(user_id, session, "full_name", text)
+        return True
+
+    if session["state"] == "waiting_edit_phone":
+        if not is_valid_phone(text):
+            send_message(user_id, "⚠️ Введите корректный номер телефона.")
+            return True
+        save_profile_field(user_id, session, "phone", text)
+        return True
+
     return False
 
 
@@ -739,7 +887,60 @@ def try_handle_action(user_id: str, action: str, session: Dict[str, Any]) -> boo
         send_message(
             user_id,
             format_profile(profile),
+            attachments=profile_actions_keyboard(),
+        )
+        return True
+
+    if action == ACTION_DELETE_DATA:
+        delete_user_data("max", user_id)
+        reset_dialog(session)
+        send_message(
+            user_id,
+            "🗑 Ваши данные удалены. Чтобы снова откликаться на вакансии, нужно будет заполнить их заново.",
             attachments=main_menu_keyboard(),
+        )
+        return True
+
+    if action == ACTION_EDIT_DATA:
+        if not get_max_profile(user_id):
+            send_registration_intro(user_id)
+            return True
+
+        send_message(
+            user_id,
+            "✏️ Что хотите скорректировать?",
+            attachments=profile_edit_keyboard(),
+        )
+        return True
+
+    if action == ACTION_EDIT_CITY:
+        if not get_max_profile(user_id):
+            send_registration_intro(user_id)
+            return True
+
+        session["state"] = "waiting_edit_city"
+        send_message(user_id, "🏙 Введите новый город:", attachments=cancel_keyboard())
+        return True
+
+    if action == ACTION_EDIT_FULL_NAME:
+        if not get_max_profile(user_id):
+            send_registration_intro(user_id)
+            return True
+
+        session["state"] = "waiting_edit_full_name"
+        send_message(user_id, "👤 Введите новые ФИО:", attachments=cancel_keyboard())
+        return True
+
+    if action == ACTION_EDIT_PHONE:
+        if not get_max_profile(user_id):
+            send_registration_intro(user_id)
+            return True
+
+        session["state"] = "waiting_edit_phone"
+        send_message(
+            user_id,
+            "📞 Отправьте новый телефон кнопкой ниже или введите номер вручную.",
+            attachments=phone_keyboard(),
         )
         return True
 
@@ -872,12 +1073,16 @@ def handle_geo(user_id: str, attachments: list[dict[str, Any]], session: Dict[st
 
 
 def handle_contact(user_id: str, attachments: list[dict[str, Any]], session: Dict[str, Any]) -> bool:
-    if session["state"] not in ("waiting_phone", "waiting_profile_phone"):
+    if session["state"] not in ("waiting_phone", "waiting_profile_phone", "waiting_edit_phone"):
         return False
 
     phone = parse_contact_phone(attachments)
     if not phone or not is_valid_phone(phone):
         send_message(user_id, "⚠️ Не удалось прочитать номер телефона, введите его вручную.")
+        return True
+
+    if session["state"] == "waiting_edit_phone":
+        save_profile_field(user_id, session, "phone", phone)
         return True
 
     session["questionnaire"]["phone"] = normalize_phone(phone)
@@ -892,7 +1097,7 @@ def handle_text_message(user_id: str, text: str, attachments: list[dict[str, Any
 
     if (
         text
-        and session["state"] in ("waiting_phone", "waiting_profile_phone")
+        and session["state"] in ("waiting_phone", "waiting_profile_phone", "waiting_edit_phone")
         and handle_stateful_input(user_id, text, session)
     ):
         return
