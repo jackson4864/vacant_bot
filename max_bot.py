@@ -366,7 +366,6 @@ def format_profile(profile: Dict[str, Any]) -> str:
 
 
 def send_registration_intro(user_id: str) -> None:
-    send_personal_data_document(user_id)
     send_message(
         user_id,
         "👋 Давайте познакомимся и соберем основную информацию для связи.\n\n"
@@ -375,11 +374,13 @@ def send_registration_intro(user_id: str) -> None:
         "👤 ФИО\n"
         "📞 телефон для связи",
     )
+    send_personal_data_document(user_id)
     send_message(
         user_id,
-        "📄 Согласие на обработку персональных данных\n\n"
-        f"{CONSENT_TEXT}\n\n"
-        "Если согласны, нажмите кнопку ниже.",
+        "📄 Пожалуйста, ознакомьтесь с документом по обработке персональных данных.\n\n"
+        "Нажимая «✅ Согласен», вы подтверждаете, что прочитали документ, понимаете цели обработки "
+        "и даёте согласие на обработку ваших персональных данных: города, ФИО и телефона "
+        "для подбора вакансий, связи с вами и фиксации откликов.",
         attachments=consent_keyboard(),
     )
 
