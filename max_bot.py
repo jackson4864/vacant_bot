@@ -6,9 +6,15 @@ import requests
 from requests.exceptions import ReadTimeout, RequestException
 
 from config import MAX_BOT_TOKEN, SEARCH_RADIUS_KM
-from db import create_tables, save_response, upsert_vacancy
+from db import (
+    create_tables,
+    get_user_profile,
+    save_response,
+    save_user_profile,
+    upsert_vacancy,
+)
 from services import find_nearest_vacancies
-from vacancy_api import get_available_titles, get_vacancies, search_vacancies
+from vacancy_api import append_sheet_row, get_available_titles, get_vacancies, search_vacancies
 
 BASE_URL = "https://platform-api.max.ru"
 MAX_RESULTS = 5
@@ -21,15 +27,22 @@ ACTION_BACK_TO_MENU = "action:menu"
 ACTION_SKIP_CITY = "action:skip_city"
 ACTION_SKIP_TITLE = "action:skip_title"
 ACTION_SHOW_MORE = "action:show_more"
+ACTION_MY_DATA = "action:my_data"
+ACTION_REGISTER = "action:register"
 TITLE_PREFIX = "title:"
 RESPOND_PREFIX = "respond:"
 LABEL_SEARCH = "🔎 Поиск по городу и должности"
 LABEL_CANCEL = "❌ Отмена"
 LABEL_MENU = "🏠 В меню"
+LABEL_MY_DATA = "👤 Мои данные"
 LABEL_SKIP_CITY = "🌍 Любой город"
 LABEL_SKIP_TITLE = "💼 Любая должность"
 LABEL_RESPOND_PREFIX = "Откликнуться #"
 LABEL_SHOW_MORE = "➡️ Показать еще"
+CONSENT_TEXT = (
+    "Даю согласие на обработку моих персональных данных: города, ФИО и телефона "
+    "для подбора вакансий, связи со мной и фиксации откликов."
+)
 
 user_sessions: Dict[str, Dict[str, Any]] = {}
 
@@ -75,6 +88,16 @@ def main_menu_keyboard() -> list[dict[str, Any]]:
         [
             [request_geo_button("📍 Быстрый поиск по гео")],
             [message_button(LABEL_SEARCH, ACTION_SEARCH)],
+            [message_button(LABEL_MY_DATA, ACTION_MY_DATA)],
+        ]
+    )
+
+
+def consent_keyboard() -> list[dict[str, Any]]:
+    return make_keyboard(
+        [
+            [message_button("✅ Согласен", ACTION_REGISTER)],
+            [message_button(LABEL_CANCEL, ACTION_CANCEL)],
         ]
     )
 
@@ -175,6 +198,7 @@ def get_session(user_id: str) -> Dict[str, Any]:
             "result_offset": 0,
             "selected_vacancy_id": None,
             "selected_vacancy_title": None,
+            "pending_response_index": None,
             "questionnaire": {},
         },
     )
@@ -189,6 +213,7 @@ def reset_dialog(session: Dict[str, Any]) -> None:
     session["result_offset"] = 0
     session["selected_vacancy_id"] = None
     session["selected_vacancy_title"] = None
+    session["pending_response_index"] = None
     session["questionnaire"] = {}
 
 
@@ -216,6 +241,69 @@ def is_valid_phone(phone: str) -> bool:
     digits = re.sub(r"\D", "", normalized)
     return 10 <= len(digits) <= 15 and (
         normalized.startswith("+") or normalized[0].isdigit()
+    )
+
+
+def get_max_profile(user_id: str) -> Optional[Dict[str, Any]]:
+    return get_user_profile("max", user_id)
+
+
+def format_profile(profile: Dict[str, Any]) -> str:
+    return (
+        "👤 Ваши данные:\n\n"
+        f"🏙 Город: {escape_text(profile['applicant_city'])}\n"
+        f"👤 ФИО: {escape_text(profile['full_name'])}\n"
+        f"📞 Телефон: {escape_text(profile['phone'])}"
+    )
+
+
+def send_registration_intro(user_id: str) -> None:
+    send_message(
+        user_id,
+        "👋 Давайте познакомимся и соберем основную информацию для связи.\n\n"
+        "Нужно будет указать:\n"
+        "🏙 город\n"
+        "👤 ФИО\n"
+        "📞 телефон для связи\n\n"
+        f"Нажимая «Согласен», вы подтверждаете: {CONSENT_TEXT}",
+        attachments=consent_keyboard(),
+    )
+
+
+def append_profile_to_sheet(user_id: str, profile: Dict[str, Any]) -> None:
+    append_sheet_row(
+        {
+            "record_type": "profile",
+            "source_platform": "max",
+            "external_user_id": user_id,
+            "applicant_city": profile["applicant_city"],
+            "full_name": profile["full_name"],
+            "phone": profile["phone"],
+            "consent_given": "yes" if profile.get("consent_given") else "no",
+            "consent_text": profile.get("consent_text") or "",
+        }
+    )
+
+
+def append_response_to_sheet(
+    user_id: str,
+    profile: Dict[str, Any],
+    vacancy: Dict[str, Any],
+) -> None:
+    append_sheet_row(
+        {
+            "record_type": "response",
+            "source_platform": "max",
+            "external_user_id": user_id,
+            "applicant_city": profile["applicant_city"],
+            "full_name": profile["full_name"],
+            "phone": profile["phone"],
+            "vacancy_region": vacancy.get("region") or "",
+            "vacancy_city": vacancy.get("city") or "",
+            "vacancy_title": vacancy.get("title") or "",
+            "vacancy_address": vacancy.get("address") or "",
+            "vacancy_project": vacancy.get("project") or "",
+        }
     )
 
 
@@ -255,6 +343,10 @@ def format_vacancy(vacancy: Dict[str, Any], index: Optional[int] = None) -> str:
 
 
 def send_welcome(user_id: str) -> None:
+    if not get_max_profile(user_id):
+        send_registration_intro(user_id)
+        return
+
     send_message(
         user_id,
         "👋 Привет! Я помогу найти вакансии.\n\n"
@@ -319,18 +411,26 @@ def send_next_results_page(user_id: str, session: Dict[str, Any]) -> None:
 
 
 def start_questionnaire(user_id: str, session: Dict[str, Any], selected_vacancy: Dict[str, Any]) -> None:
-    local_vacancy_id = upsert_vacancy(selected_vacancy)
-    session["selected_vacancy_id"] = local_vacancy_id
-    session["selected_vacancy_title"] = selected_vacancy["title"]
-    session["questionnaire"] = {}
-    session["state"] = "waiting_applicant_city"
+    profile = get_max_profile(user_id)
+    if not profile:
+        send_registration_intro(user_id)
+        return
 
+    local_vacancy_id = upsert_vacancy(selected_vacancy)
+    save_response(
+        vacancy_id=local_vacancy_id,
+        full_name=profile["full_name"],
+        phone=profile["phone"],
+        applicant_city=profile["applicant_city"],
+        source_platform="max",
+        external_user_id=user_id,
+    )
+    append_response_to_sheet(user_id, profile, selected_vacancy)
     send_message(
         user_id,
-        "✅ Отклик на вакансию:\n"
-        f"{selected_vacancy['title']}\n\n"
-        "🏙 Введите ваш город:",
-        attachments=cancel_keyboard(),
+        f"✅ Отклик на вакансию {selected_vacancy['title']} сохранен.\n"
+        "📞 С вами в ближайшее время свяжется специалист отдела подбора, ожидайте звонка.",
+        attachments=main_menu_keyboard(),
     )
 
 
@@ -353,6 +453,45 @@ def complete_response(user_id: str, session: Dict[str, Any]) -> None:
         "📞 С вами в ближайшее время свяжется специалист отдела подбора, ожидайте звонка.",
         attachments=main_menu_keyboard(),
     )
+
+
+def begin_registration_flow(user_id: str, session: Dict[str, Any]) -> None:
+    session["state"] = "waiting_profile_city"
+    session["questionnaire"] = {"consent_text": CONSENT_TEXT}
+    send_message(
+        user_id,
+        "🏙 Введите ваш город:",
+        attachments=cancel_keyboard(),
+    )
+
+
+def complete_registration(user_id: str, session: Dict[str, Any]) -> None:
+    questionnaire = session["questionnaire"]
+    profile = save_user_profile(
+        source_platform="max",
+        external_user_id=user_id,
+        applicant_city=questionnaire["applicant_city"],
+        full_name=questionnaire["full_name"],
+        phone=questionnaire["phone"],
+        consent_given=True,
+        consent_text=questionnaire.get("consent_text") or CONSENT_TEXT,
+    )
+    append_profile_to_sheet(user_id, profile)
+
+    pending_response_index = session.get("pending_response_index")
+    session["state"] = None
+    session["questionnaire"] = {}
+    session["pending_response_index"] = None
+
+    send_message(
+        user_id,
+        "✅ Спасибо, данные сохранены.\n\n" + format_profile(profile),
+        attachments=main_menu_keyboard(),
+    )
+
+    if pending_response_index is not None and session["all_results"]:
+        if 0 <= pending_response_index < len(session["all_results"]):
+            start_questionnaire(user_id, session, session["all_results"][pending_response_index])
 
 
 def parse_contact_phone(attachments: list[dict[str, Any]]) -> Optional[str]:
@@ -513,12 +652,12 @@ def handle_stateful_input(user_id: str, text: str, session: Dict[str, Any]) -> b
         send_message(user_id, "💼 Выберите должность кнопкой из списка.")
         return True
 
-    if session["state"] == "waiting_applicant_city":
+    if session["state"] in ("waiting_applicant_city", "waiting_profile_city"):
         if len(text) < 2:
             send_message(user_id, "⚠️ Введите корректный город.")
             return True
         session["questionnaire"]["applicant_city"] = text
-        session["state"] = "waiting_full_name"
+        session["state"] = "waiting_profile_full_name"
         send_message(
             user_id,
             "👤 Введите ФИО:",
@@ -526,12 +665,12 @@ def handle_stateful_input(user_id: str, text: str, session: Dict[str, Any]) -> b
         )
         return True
 
-    if session["state"] == "waiting_full_name":
+    if session["state"] in ("waiting_full_name", "waiting_profile_full_name"):
         if len(text) < 5 or len(text.split()) < 2:
             send_message(user_id, "⚠️ Пожалуйста, введите корректные ФИО.")
             return True
         session["questionnaire"]["full_name"] = text
-        session["state"] = "waiting_phone"
+        session["state"] = "waiting_profile_phone"
         send_message(
             user_id,
             "📞 Отправьте телефон кнопкой ниже или введите номер вручную.",
@@ -539,18 +678,35 @@ def handle_stateful_input(user_id: str, text: str, session: Dict[str, Any]) -> b
         )
         return True
 
-    if session["state"] == "waiting_phone":
+    if session["state"] in ("waiting_phone", "waiting_profile_phone"):
         if not is_valid_phone(text):
             send_message(user_id, "⚠️ Введите корректный номер телефона.")
             return True
         session["questionnaire"]["phone"] = normalize_phone(text)
-        complete_response(user_id, session)
+        complete_registration(user_id, session)
         return True
 
     return False
 
 
 def try_handle_action(user_id: str, action: str, session: Dict[str, Any]) -> bool:
+    if action == ACTION_REGISTER:
+        begin_registration_flow(user_id, session)
+        return True
+
+    if action == ACTION_MY_DATA:
+        profile = get_max_profile(user_id)
+        if not profile:
+            send_registration_intro(user_id)
+            return True
+
+        send_message(
+            user_id,
+            format_profile(profile),
+            attachments=main_menu_keyboard(),
+        )
+        return True
+
     if action == ACTION_SEARCH:
         begin_search_flow(user_id, session)
         return True
@@ -629,6 +785,11 @@ def try_handle_action(user_id: str, action: str, session: Dict[str, Any]) -> boo
             send_message(user_id, "🔎 Нет вакансии с таким номером.")
             return True
 
+        if not get_max_profile(user_id):
+            session["pending_response_index"] = index
+            send_registration_intro(user_id)
+            return True
+
         start_questionnaire(user_id, session, session["all_results"][index])
         return True
 
@@ -675,7 +836,7 @@ def handle_geo(user_id: str, attachments: list[dict[str, Any]], session: Dict[st
 
 
 def handle_contact(user_id: str, attachments: list[dict[str, Any]], session: Dict[str, Any]) -> bool:
-    if session["state"] != "waiting_phone":
+    if session["state"] not in ("waiting_phone", "waiting_profile_phone"):
         return False
 
     phone = parse_contact_phone(attachments)
@@ -684,7 +845,7 @@ def handle_contact(user_id: str, attachments: list[dict[str, Any]], session: Dic
         return True
 
     session["questionnaire"]["phone"] = normalize_phone(phone)
-    complete_response(user_id, session)
+    complete_registration(user_id, session)
     return True
 
 

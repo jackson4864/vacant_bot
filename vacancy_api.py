@@ -3,7 +3,13 @@ from typing import Optional
 import requests
 from requests import RequestException
 
-API_URL = "https://sheetdb.io/api/v1/gydose9dofxsj"
+from config import (
+    SHEETDB_API_URL,
+    SHEETDB_RESPONSES_API_URL,
+    SHEETDB_RESPONSES_SHEET_NAME,
+)
+
+API_URL = SHEETDB_API_URL
 
 
 def _normalize_vacancy(vacancy):
@@ -95,3 +101,19 @@ def get_available_titles(city=None):
 
     titles.sort()
     return titles
+
+
+def append_sheet_row(row: dict, sheet_name: Optional[str] = SHEETDB_RESPONSES_SHEET_NAME) -> bool:
+    params = {"sheet": sheet_name} if sheet_name else None
+
+    try:
+        response = requests.post(
+            SHEETDB_RESPONSES_API_URL,
+            params=params,
+            json={"data": row},
+            timeout=30,
+        )
+    except RequestException:
+        return False
+
+    return 200 <= response.status_code < 300
