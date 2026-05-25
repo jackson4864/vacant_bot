@@ -354,7 +354,6 @@ def send_registration_intro(user_id: str) -> None:
         "Если согласны, нажмите кнопку ниже.",
         attachments=consent_keyboard(),
     )
-    send_personal_data_document(user_id)
 
 
 def append_profile_to_sheet(user_id: str, profile: Dict[str, Any]) -> None:
@@ -439,16 +438,12 @@ def format_vacancy(vacancy: Dict[str, Any], index: Optional[int] = None) -> str:
 
 
 def send_welcome(user_id: str) -> None:
-    if not get_max_profile(user_id):
-        send_registration_intro(user_id)
-        return
-
     send_message(
         user_id,
-        "👋 Привет! Я помогу найти вакансии.\n\n"
-        "Используйте кнопки ниже:\n"
-        "📍 быстрый поиск по геолокации\n"
-        "🔎 поиск по городу и должности",
+        "👋 Привет! Здесь можно быстро найти подработку или постоянную вакансию рядом с вами.\n\n"
+        "💼 Подберём варианты по геолокации, городу или должности.\n"
+        "✅ Когда найдёте подходящую вакансию, отклик займёт меньше минуты.\n"
+        "📞 Ваши контактные данные понадобятся только для связи по отклику.",
         attachments=main_menu_keyboard(),
     )
 
@@ -509,10 +504,12 @@ def send_next_results_page(user_id: str, session: Dict[str, Any]) -> None:
 def start_questionnaire(user_id: str, session: Dict[str, Any], selected_vacancy: Dict[str, Any]) -> None:
     profile = get_max_profile(user_id)
     if not profile:
+        send_personal_data_document(user_id)
         send_registration_intro(user_id)
         return
 
     local_vacancy_id = upsert_vacancy(selected_vacancy)
+    send_personal_data_document(user_id)
     save_response(
         vacancy_id=local_vacancy_id,
         full_name=profile["full_name"],
