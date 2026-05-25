@@ -180,7 +180,7 @@ def send_message(
     user_id: str,
     text: str,
     attachments: Optional[list[dict[str, Any]]] = None,
-) -> None:
+) -> requests.Response:
     token = require_max_token()
     payload: dict[str, Any] = {"text": f"{BOT_LABEL}\n{text}"}
     if attachments:
@@ -198,6 +198,7 @@ def send_message(
     )
     print("SEND STATUS:", response.status_code)
     print("SEND RESPONSE:", response.text)
+    return response
 
 
 def upload_file_attachment(file_path: Path) -> Optional[dict[str, Any]]:
@@ -222,6 +223,7 @@ def upload_file_attachment(file_path: Path) -> Optional[dict[str, Any]]:
         with file_path.open("rb") as file:
             file_response = requests.post(
                 upload_url,
+                headers={"Authorization": token},
                 files={"data": (file_path.name, file)},
                 timeout=60,
             )
@@ -231,6 +233,7 @@ def upload_file_attachment(file_path: Path) -> Optional[dict[str, Any]]:
         return None
 
     payload = file_response.json()
+    print("MAX FILE UPLOAD OK:", payload)
     return {"type": "file", "payload": payload}
 
 
@@ -239,11 +242,17 @@ def send_personal_data_document(user_id: str) -> None:
     if not attachment:
         return
 
-    send_message(
-        user_id,
-        "📎 Документ по обработке персональных данных.",
-        attachments=[attachment],
-    )
+    for attempt in range(3):
+        response = send_message(
+            user_id,
+            "📎 Документ по обработке персональных данных.",
+            attachments=[attachment],
+        )
+        if response.status_code != 400 or "attachment.not.ready" not in response.text:
+            return
+
+        print("MAX FILE ATTACHMENT NOT READY, retry:", attempt + 1)
+        time.sleep(2 + attempt * 2)
 
 
 def get_updates(marker: Optional[str] = None) -> Dict[str, Any]:
