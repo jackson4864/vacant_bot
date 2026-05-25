@@ -130,26 +130,38 @@ async def send_registration_intro(message: Message) -> None:
     )
 
 
-def append_response_to_sheet(external_user_id: str, profile: dict, vacancy: dict) -> None:
-    append_sheet_row(
-        {
-            "record_type": "response",
-            "created_at": "DATETIME",
-            "source_platform": "telegram",
-            "external_user_id": external_user_id,
-            "applicant_city": profile["applicant_city"],
-            "city": profile["applicant_city"],
-            "full_name": profile["full_name"],
-            "phone": profile["phone"],
-            "vacancy": vacancy.get("title") or "",
-            "vacancy_city": vacancy.get("city") or "",
-            "address": vacancy.get("address") or "",
-            "vacancy_region": vacancy.get("region") or "",
-            "vacancy_title": vacancy.get("title") or "",
-            "vacancy_address": vacancy.get("address") or "",
-            "vacancy_project": vacancy.get("project") or "",
-        }
+def append_response_to_sheet(external_user_id: str, profile: dict, vacancy: dict) -> bool:
+    row = {
+        "record_type": "response",
+        "created_at": "DATETIME",
+        "source_platform": "telegram",
+        "external_user_id": external_user_id,
+        "applicant_city": profile["applicant_city"],
+        "city": profile["applicant_city"],
+        "full_name": profile["full_name"],
+        "phone": profile["phone"],
+        "vacancy": vacancy.get("title") or "",
+        "vacancy_city": vacancy.get("city") or "",
+        "address": vacancy.get("address") or "",
+        "vacancy_region": vacancy.get("region") or "",
+        "vacancy_title": vacancy.get("title") or "",
+        "vacancy_address": vacancy.get("address") or "",
+        "vacancy_project": vacancy.get("project") or "",
+    }
+    print(
+        "TELEGRAM SHEET APPEND START:",
+        "user_id=",
+        external_user_id,
+        "city=",
+        row["city"],
+        "vacancy=",
+        row["vacancy"],
+        "vacancy_city=",
+        row["vacancy_city"],
     )
+    ok = append_sheet_row(row)
+    print("TELEGRAM SHEET APPEND RESULT:", ok)
+    return ok
 
 
 def vacancy_key(vacancy: dict) -> str:
@@ -425,15 +437,27 @@ async def persist_response(message: Message, state: FSMContext, phone: str) -> N
     )
 
     vacancy = get_vacancy_by_id(vacancy_id)
+    sheet_saved = False
     if profile and vacancy and external_user_id:
-        append_response_to_sheet(external_user_id, profile, vacancy)
+        sheet_saved = append_response_to_sheet(external_user_id, profile, vacancy)
+    else:
+        print(
+            "TELEGRAM SHEET APPEND SKIPPED:",
+            "profile=",
+            bool(profile),
+            "vacancy=",
+            bool(vacancy),
+            "external_user_id=",
+            external_user_id,
+        )
 
     title = escape_text(vacancy["title"]) if vacancy else "вакансию"
+    sheet_warning = "" if sheet_saved else "\n\n⚠️ Отклик сохранён в боте, но не записался в таблицу. Администратор проверит подключение."
 
     await message.answer(
         f"✅ Спасибо! Ваш отклик на вакансию <b>{title}</b> сохранен.\n"
         "📞 С вами в ближайшее время свяжется специалист отдела подбора, "
-        "ожидайте звонка.",
+        f"ожидайте звонка.{sheet_warning}",
         reply_markup=main_menu_keyboard(),
     )
     await state.clear()
@@ -454,12 +478,16 @@ async def persist_response_with_profile(
         external_user_id=external_user_id,
         telegram_user_id=callback.from_user.id if callback.from_user else None,
     )
+    sheet_saved = False
     if external_user_id:
-        append_response_to_sheet(external_user_id, profile, vacancy)
+        sheet_saved = append_response_to_sheet(external_user_id, profile, vacancy)
+    else:
+        print("TELEGRAM SHEET APPEND SKIPPED: empty external_user_id")
 
+    sheet_warning = "" if sheet_saved else "\n\n⚠️ Отклик сохранён в боте, но не записался в таблицу. Администратор проверит подключение."
     await callback.message.answer(
         f"✅ Отклик на вакансию <b>{escape_text(vacancy['title'])}</b> сохранен.\n"
-        "📞 С вами в ближайшее время свяжется специалист отдела подбора, ожидайте звонка.",
+        f"📞 С вами в ближайшее время свяжется специалист отдела подбора, ожидайте звонка.{sheet_warning}",
         reply_markup=main_menu_keyboard(),
     )
 
@@ -756,10 +784,11 @@ async def complete_profile(message: Message, state: FSMContext, phone: str) -> N
                 username=message.from_user.username if message.from_user else None,
                 chat_id=message.chat.id,
             )
-            append_response_to_sheet(external_user_id, profile, vacancy)
+            sheet_saved = append_response_to_sheet(external_user_id, profile, vacancy)
+            sheet_warning = "" if sheet_saved else "\n\n⚠️ Отклик сохранён в боте, но не записался в таблицу. Администратор проверит подключение."
             await message.answer(
                 f"✅ Отклик на вакансию <b>{escape_text(vacancy['title'])}</b> сохранен.\n"
-                "📞 С вами в ближайшее время свяжется специалист отдела подбора, ожидайте звонка."
+                f"📞 С вами в ближайшее время свяжется специалист отдела подбора, ожидайте звонка.{sheet_warning}"
             )
 
 
