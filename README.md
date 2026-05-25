@@ -17,7 +17,14 @@ pip install -r requirements.txt
 BOT_TOKEN=your_telegram_bot_token
 MAX_BOT_TOKEN=your_max_bot_token
 SEARCH_RADIUS_KM=10
+SHEETDB_API_URL=your_vacancies_sheetdb_url
+SHEETDB_RESPONSES_API_URL=your_profiles_and_responses_sheetdb_url
+SHEETDB_RESPONSES_SHEET_NAME=отклик
 ```
+
+If `SHEETDB_RESPONSES_API_URL` is not set, profile and response rows are sent to
+the same SheetDB URL used for vacancies. `SHEETDB_RESPONSES_SHEET_NAME` selects
+the Google Sheets tab where profile and response rows are appended.
 
 ## Run
 

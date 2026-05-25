@@ -6,6 +6,7 @@ from aiogram.types import (
 )
 
 CATALOG_BUTTON_TEXT = "📋 Каталог вакансий"
+MY_DATA_BUTTON_TEXT = "👤 Мои данные"
 
 
 def location_keyboard() -> ReplyKeyboardMarkup:
@@ -13,8 +14,18 @@ def location_keyboard() -> ReplyKeyboardMarkup:
         keyboard=[
             [KeyboardButton(text="📍 Отправить геопозицию", request_location=True)],
             [KeyboardButton(text=CATALOG_BUTTON_TEXT)],
+            [KeyboardButton(text=MY_DATA_BUTTON_TEXT)],
         ],
         resize_keyboard=True,
+    )
+
+
+def consent_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Согласен", callback_data="profile:consent")],
+            [InlineKeyboardButton(text="❌ Позже", callback_data="profile:later")],
+        ]
     )
 
 

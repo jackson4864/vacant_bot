@@ -85,6 +85,22 @@ def create_tables() -> None:
         _add_column_if_missing(conn, "responses", "external_user_id", "TEXT")
 
         cursor.execute("""
+        CREATE TABLE IF NOT EXISTS user_profiles (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_platform TEXT NOT NULL,
+            external_user_id TEXT NOT NULL,
+            applicant_city TEXT NOT NULL,
+            full_name TEXT NOT NULL,
+            phone TEXT NOT NULL,
+            consent_given INTEGER DEFAULT 0,
+            consent_text TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(source_platform, external_user_id)
+        )
+        """)
+
+        cursor.execute("""
         CREATE INDEX IF NOT EXISTS idx_vacancies_region_city
         ON vacancies(region, city)
         """)
@@ -99,6 +115,10 @@ def create_tables() -> None:
         cursor.execute("""
         CREATE INDEX IF NOT EXISTS idx_responses_telegram_user_id
         ON responses(telegram_user_id)
+        """)
+        cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_user_profiles_external_id
+        ON user_profiles(source_platform, external_user_id)
         """)
 
         conn.commit()
@@ -418,6 +438,70 @@ def export_responses() -> None:
     _write_response_export(rows, append=False)
 
 
+def get_user_profile(
+    source_platform: str,
+    external_user_id: str,
+) -> Optional[Dict[str, Any]]:
+    with closing(get_connection()) as conn:
+        row = conn.execute(
+            """
+            SELECT * FROM user_profiles
+            WHERE source_platform = ? AND external_user_id = ?
+            """,
+            (source_platform, external_user_id),
+        ).fetchone()
+
+    return dict(row) if row else None
+
+
+def save_user_profile(
+    source_platform: str,
+    external_user_id: str,
+    applicant_city: str,
+    full_name: str,
+    phone: str,
+    consent_given: bool,
+    consent_text: Optional[str] = None,
+) -> Dict[str, Any]:
+    with closing(get_connection()) as conn:
+        conn.execute(
+            """
+            INSERT INTO user_profiles (
+                source_platform,
+                external_user_id,
+                applicant_city,
+                full_name,
+                phone,
+                consent_given,
+                consent_text
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(source_platform, external_user_id) DO UPDATE SET
+                applicant_city = excluded.applicant_city,
+                full_name = excluded.full_name,
+                phone = excluded.phone,
+                consent_given = excluded.consent_given,
+                consent_text = excluded.consent_text,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (
+                source_platform,
+                external_user_id,
+                applicant_city,
+                full_name,
+                phone,
+                1 if consent_given else 0,
+                consent_text,
+            ),
+        )
+        conn.commit()
+
+    profile = get_user_profile(source_platform, external_user_id)
+    if profile is None:
+        raise RuntimeError("Failed to save user profile")
+    return profile
+
+
 def save_response(
     vacancy_id: int,
     full_name: str,
@@ -428,7 +512,7 @@ def save_response(
     telegram_user_id: Optional[int] = None,
     username: Optional[str] = None,
     chat_id: Optional[int] = None,
-) -> None:
+) -> int:
     with closing(get_connection()) as conn:
         cursor = conn.execute(
             """
@@ -461,3 +545,4 @@ def save_response(
         conn.commit()
 
     append_response_export(response_id)
+    return int(response_id)
