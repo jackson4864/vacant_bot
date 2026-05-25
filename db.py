@@ -4,7 +4,7 @@ from contextlib import closing
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from config import DB_NAME, RESPONSES_EXPORT_FILE
+from config import DB_NAME, RESPONSES_EXPORT_FILE, USER_PROFILES_EXPORT_FILE
 
 
 def get_connection() -> sqlite3.Connection:
@@ -436,6 +436,52 @@ def export_responses() -> None:
         return
 
     _write_response_export(rows, append=False)
+
+
+USER_PROFILE_EXPORT_FIELDS = [
+    "created_at",
+    "updated_at",
+    "source_platform",
+    "external_user_id",
+    "full_name",
+    "applicant_city",
+    "phone",
+    "consent_given",
+    "consent_text",
+]
+
+
+def export_user_profiles() -> None:
+    with closing(get_connection()) as conn:
+        rows = conn.execute(
+            """
+            SELECT
+                created_at,
+                updated_at,
+                source_platform,
+                external_user_id,
+                full_name,
+                applicant_city,
+                phone,
+                consent_given,
+                consent_text
+            FROM user_profiles
+            ORDER BY updated_at, id
+            """
+        ).fetchall()
+
+    export_path = Path(USER_PROFILES_EXPORT_FILE)
+    with export_path.open("w", newline="", encoding="utf-8-sig") as file:
+        writer = csv.DictWriter(
+            file,
+            fieldnames=USER_PROFILE_EXPORT_FIELDS,
+            delimiter=";",
+        )
+        writer.writeheader()
+        for row in rows:
+            row_dict = dict(row)
+            row_dict["consent_given"] = "yes" if row_dict["consent_given"] else "no"
+            writer.writerow(row_dict)
 
 
 def get_user_profile(

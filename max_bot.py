@@ -385,26 +385,6 @@ def send_registration_intro(user_id: str) -> None:
     )
 
 
-def append_profile_to_sheet(user_id: str, profile: Dict[str, Any]) -> None:
-    append_sheet_row(
-        {
-            "record_type": "profile",
-            "created_at": "DATETIME",
-            "source_platform": "max",
-            "external_user_id": user_id,
-            "applicant_city": profile["applicant_city"],
-            "city": profile["applicant_city"],
-            "full_name": profile["full_name"],
-            "phone": profile["phone"],
-            "vacancy": "",
-            "vacancy_city": "",
-            "address": "",
-            "consent_given": "yes" if profile.get("consent_given") else "no",
-            "consent_text": profile.get("consent_text") or "",
-        }
-    )
-
-
 def append_response_to_sheet(
     user_id: str,
     profile: Dict[str, Any],
@@ -537,7 +517,6 @@ def start_questionnaire(user_id: str, session: Dict[str, Any], selected_vacancy:
         return
 
     local_vacancy_id = upsert_vacancy(selected_vacancy)
-    send_personal_data_document(user_id)
     save_response(
         vacancy_id=local_vacancy_id,
         full_name=profile["full_name"],
@@ -597,8 +576,6 @@ def complete_registration(user_id: str, session: Dict[str, Any]) -> None:
         consent_given=True,
         consent_text=questionnaire.get("consent_text") or CONSENT_TEXT,
     )
-    append_profile_to_sheet(user_id, profile)
-
     pending_response_index = session.get("pending_response_index")
     session["state"] = None
     session["questionnaire"] = {}

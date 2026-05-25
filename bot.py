@@ -104,26 +104,6 @@ async def send_registration_intro(message: Message) -> None:
     )
 
 
-def append_profile_to_sheet(external_user_id: str, profile: dict) -> None:
-    append_sheet_row(
-        {
-            "record_type": "profile",
-            "created_at": "DATETIME",
-            "source_platform": "telegram",
-            "external_user_id": external_user_id,
-            "applicant_city": profile["applicant_city"],
-            "city": profile["applicant_city"],
-            "full_name": profile["full_name"],
-            "phone": profile["phone"],
-            "vacancy": "",
-            "vacancy_city": "",
-            "address": "",
-            "consent_given": "yes" if profile.get("consent_given") else "no",
-            "consent_text": profile.get("consent_text") or "",
-        }
-    )
-
-
 def append_response_to_sheet(external_user_id: str, profile: dict, vacancy: dict) -> None:
     append_sheet_row(
         {
@@ -533,8 +513,6 @@ async def complete_profile(message: Message, state: FSMContext, phone: str) -> N
         consent_given=True,
         consent_text=data.get("consent_text") or CONSENT_TEXT,
     )
-    append_profile_to_sheet(external_user_id, profile)
-
     pending_vacancy_id = data.get("pending_vacancy_id")
     await state.clear()
     await message.answer(

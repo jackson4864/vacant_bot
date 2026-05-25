@@ -30,3 +30,4 @@ SHEETDB_RESPONSES_SHEET_NAME = os.getenv("SHEETDB_RESPONSES_SHEET_NAME", "отк
 SEARCH_RADIUS_KM = get_int_env("SEARCH_RADIUS_KM", 10)
 DB_NAME = os.path.join(BASE_DIR, "vacancies.db")
 RESPONSES_EXPORT_FILE = os.path.join(BASE_DIR, "responses.csv")
+USER_PROFILES_EXPORT_FILE = os.path.join(BASE_DIR, "user_profiles.csv")
