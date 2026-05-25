@@ -302,6 +302,20 @@ def get_regions() -> List[str]:
     return [row["region"] for row in rows]
 
 
+def get_all_cities() -> List[str]:
+    with closing(get_connection()) as conn:
+        rows = conn.execute(
+            """
+            SELECT DISTINCT city FROM vacancies
+            WHERE city IS NOT NULL
+              AND TRIM(city) != ''
+              AND is_active = 1
+            ORDER BY city
+            """
+        ).fetchall()
+    return [row["city"] for row in rows]
+
+
 def get_cities_by_region(region: str) -> List[str]:
     with closing(get_connection()) as conn:
         rows = conn.execute(
@@ -318,17 +332,26 @@ def get_cities_by_region(region: str) -> List[str]:
     return [row["city"] for row in rows]
 
 
-def get_vacancies_by_city(region: str, city: str) -> List[Dict[str, Any]]:
-    with closing(get_connection()) as conn:
-        rows = conn.execute(
-            """
+def get_vacancies_by_city(region: Optional[str], city: str) -> List[Dict[str, Any]]:
+    if region:
+        query = """
             SELECT * FROM vacancies
             WHERE region = ? AND city = ?
               AND is_active = 1
             ORDER BY project, title, address
-            """,
-            (region, city),
-        ).fetchall()
+            """
+        params = (region, city)
+    else:
+        query = """
+            SELECT * FROM vacancies
+            WHERE city = ?
+              AND is_active = 1
+            ORDER BY project, title, address
+            """
+        params = (city,)
+
+    with closing(get_connection()) as conn:
+        rows = conn.execute(query, params).fetchall()
     return [dict(row) for row in rows]
 
 

@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import html
 import re
 from typing import Optional
@@ -10,16 +11,22 @@ from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message, ReplyKeyboardRemove
 
-from config import BOT_TOKEN, SEARCH_RADIUS_KM
+from config import BOT_TOKEN, SEARCH_RADIUS_KM, VACANCY_NOTIFY_INTERVAL_SECONDS
 from db import (
     create_tables,
+    get_all_cities,
     get_cities_by_region,
+    get_known_external_vacancy_keys,
     get_regions,
     get_user_profile,
+    get_user_profiles_by_city,
     get_vacancies_by_city,
     get_vacancy_by_id,
+    save_known_external_vacancy_key,
+    save_known_external_vacancy_keys,
     save_response,
     save_user_profile,
+    upsert_vacancy,
 )
 from keyboards import (
     CATALOG_BUTTON_TEXT,
@@ -34,10 +41,11 @@ from keyboards import (
 )
 from services import find_nearby_vacancies
 from states import ProfileForm, ResponseForm
-from vacancy_api import append_sheet_row
+from vacancy_api import append_sheet_row, get_vacancies
 
 
 dp = Dispatcher()
+VACANCY_NOTIFY_SOURCE = "telegram_vacancy_api"
 CONSENT_TEXT = (
     "Даю согласие на обработку моих персональных данных: города, ФИО и телефона "
     "для подбора вакансий, связи со мной и фиксации откликов."
@@ -126,6 +134,47 @@ def append_response_to_sheet(external_user_id: str, profile: dict, vacancy: dict
     )
 
 
+def vacancy_key(vacancy: dict) -> str:
+    vacancy_id = str(vacancy.get("vacancy_id") or "").strip()
+    if vacancy_id:
+        return f"id:{vacancy_id.lower()}"
+
+    parts = [
+        vacancy.get("project") or "",
+        vacancy.get("region") or "",
+        vacancy.get("city") or "",
+        vacancy.get("title") or "",
+        vacancy.get("address") or "",
+        str(vacancy.get("latitude") or ""),
+        str(vacancy.get("longitude") or ""),
+    ]
+    raw = "|".join(str(part).strip().lower() for part in parts)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def sync_vacancies_from_api() -> int:
+    synced = 0
+    for vacancy in get_vacancies():
+        upsert_vacancy(vacancy)
+        synced += 1
+    print("TELEGRAM VACANCY SYNC:", synced)
+    return synced
+
+
+def seed_known_vacancies() -> None:
+    known = get_known_external_vacancy_keys(VACANCY_NOTIFY_SOURCE)
+    if known:
+        print("TELEGRAM VACANCY NOTIFY KNOWN:", len(known))
+        return
+
+    vacancies = get_vacancies()
+    save_known_external_vacancy_keys(
+        VACANCY_NOTIFY_SOURCE,
+        [vacancy_key(vacancy) for vacancy in vacancies],
+    )
+    print("TELEGRAM VACANCY NOTIFY SEED:", len(vacancies))
+
+
 def format_vacancy(vacancy: dict, include_distance: bool = False) -> str:
     lines = [f"💼 <b>{escape_text(vacancy['title'])}</b>"]
 
@@ -157,12 +206,119 @@ def format_vacancy(vacancy: dict, include_distance: bool = False) -> str:
     return "\n".join(lines)
 
 
+async def notify_new_vacancy(bot: Bot, vacancy: dict) -> None:
+    city = str(vacancy.get("city") or "").strip()
+    if not city:
+        print("TELEGRAM VACANCY NOTIFY SKIP: empty city", vacancy.get("title"))
+        return
+
+    profiles = get_user_profiles_by_city("telegram", city)
+    print(
+        "TELEGRAM VACANCY NOTIFY MATCH:",
+        "city=",
+        city,
+        "title=",
+        vacancy.get("title"),
+        "profiles=",
+        len(profiles),
+    )
+    if not profiles:
+        return
+
+    local_vacancy_id = upsert_vacancy(vacancy)
+    message_text = (
+        f"🔔 Открыта новая вакансия в городе {escape_text(city)}.\n\n"
+        f"{format_vacancy(vacancy)}"
+    )
+
+    for profile in profiles:
+        try:
+            await bot.send_message(
+                chat_id=int(profile["external_user_id"]),
+                text=message_text,
+                reply_markup=respond_keyboard(local_vacancy_id),
+                disable_web_page_preview=True,
+            )
+            print(
+                "TELEGRAM VACANCY NOTIFY SENT:",
+                "user_id=",
+                profile["external_user_id"],
+                "city=",
+                city,
+                "title=",
+                vacancy.get("title"),
+            )
+        except Exception as exc:
+            print(
+                "TELEGRAM VACANCY NOTIFY ERROR:",
+                "user_id=",
+                profile["external_user_id"],
+                "error=",
+                exc,
+            )
+
+
+async def check_new_vacancies(bot: Bot) -> None:
+    known = get_known_external_vacancy_keys(VACANCY_NOTIFY_SOURCE)
+    vacancies = get_vacancies()
+    print("TELEGRAM VACANCY NOTIFY CHECK:", "known=", len(known), "api=", len(vacancies))
+
+    if not known:
+        save_known_external_vacancy_keys(
+            VACANCY_NOTIFY_SOURCE,
+            [vacancy_key(vacancy) for vacancy in vacancies],
+        )
+        print("TELEGRAM VACANCY NOTIFY SEED DURING CHECK:", len(vacancies))
+        return
+
+    for vacancy in vacancies:
+        key = vacancy_key(vacancy)
+        if key in known:
+            continue
+
+        print(
+            "TELEGRAM VACANCY NOTIFY NEW:",
+            "city=",
+            vacancy.get("city"),
+            "title=",
+            vacancy.get("title"),
+            "address=",
+            vacancy.get("address"),
+        )
+        await notify_new_vacancy(bot, vacancy)
+        save_known_external_vacancy_key(VACANCY_NOTIFY_SOURCE, key)
+        known.add(key)
+
+
+async def vacancy_notification_loop(bot: Bot) -> None:
+    while True:
+        await asyncio.sleep(VACANCY_NOTIFY_INTERVAL_SECONDS)
+        try:
+            sync_vacancies_from_api()
+            await check_new_vacancies(bot)
+        except Exception as exc:
+            print("TELEGRAM VACANCY NOTIFY LOOP ERROR:", exc)
+
+
 async def show_regions(target: Message | CallbackQuery, state: FSMContext) -> None:
+    sync_vacancies_from_api()
     regions = get_regions()
     await state.update_data(catalog_regions=regions)
 
     if not regions:
-        text = "🔎 Пока нет вакансий с заполненным регионом."
+        cities = get_all_cities()
+        if cities:
+            await state.update_data(catalog_region=None, catalog_cities=cities)
+            text = "🏙 Выберите город:"
+            markup = city_keyboard(cities)
+            if isinstance(target, CallbackQuery):
+                await target.message.answer(text, reply_markup=markup)
+                await target.answer()
+            else:
+                await target.answer(text, reply_markup=markup)
+            return
+
+        text = "🔎 Пока нет вакансий."
         if isinstance(target, CallbackQuery):
             await target.message.answer(text)
             await target.answer()
@@ -355,9 +511,16 @@ async def catalog_regions_callback(callback: CallbackQuery, state: FSMContext) -
 @dp.callback_query(F.data == "catalog:cities")
 async def catalog_cities_callback(callback: CallbackQuery, state: FSMContext) -> None:
     data = await state.get_data()
+    if "catalog_region" not in data:
+        await show_regions(callback, state)
+        return
+
     region = data.get("catalog_region")
     if not region:
-        await show_regions(callback, state)
+        cities = get_all_cities()
+        await state.update_data(catalog_cities=cities)
+        await callback.message.answer("🏙 Выберите город:", reply_markup=city_keyboard(cities))
+        await callback.answer()
         return
 
     await show_cities(callback, state, region)
@@ -384,12 +547,12 @@ async def catalog_city_callback(callback: CallbackQuery, state: FSMContext) -> N
     region = data.get("catalog_region")
     cities = data.get("catalog_cities")
 
-    if not region:
+    if "catalog_region" not in data:
         await show_regions(callback, state)
         return
 
     if not cities:
-        cities = get_cities_by_region(region)
+        cities = get_cities_by_region(region) if region else get_all_cities()
 
     try:
         city_index = int(callback.data.split(":", 1)[1])
@@ -632,6 +795,8 @@ async def phone_fallback_handler(message: Message) -> None:
 
 async def main() -> None:
     create_tables()
+    sync_vacancies_from_api()
+    seed_known_vacancies()
 
     if not BOT_TOKEN:
         raise ValueError("BOT_TOKEN is not set in .env")
@@ -640,6 +805,7 @@ async def main() -> None:
         token=BOT_TOKEN,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
+    asyncio.create_task(vacancy_notification_loop(bot))
     await dp.start_polling(bot)
 
 
