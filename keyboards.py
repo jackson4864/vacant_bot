@@ -9,14 +9,23 @@ CATALOG_BUTTON_TEXT = "📋 Каталог вакансий"
 MY_DATA_BUTTON_TEXT = "👤 Мои данные"
 
 
+def main_menu_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="📍 Быстрый поиск по гео", callback_data="main:geo")],
+            [InlineKeyboardButton(text=CATALOG_BUTTON_TEXT, callback_data="main:catalog")],
+            [InlineKeyboardButton(text=MY_DATA_BUTTON_TEXT, callback_data="main:my_data")],
+        ]
+    )
+
+
 def location_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="📍 Отправить геопозицию", request_location=True)],
-            [KeyboardButton(text=CATALOG_BUTTON_TEXT)],
-            [KeyboardButton(text=MY_DATA_BUTTON_TEXT)],
         ],
         resize_keyboard=True,
+        one_time_keyboard=True,
     )
 
 

@@ -2,6 +2,7 @@ import asyncio
 import hashlib
 import html
 import re
+from pathlib import Path
 from typing import Optional
 
 from aiogram import Bot, Dispatcher, F
@@ -9,7 +10,7 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Message, ReplyKeyboardRemove
+from aiogram.types import CallbackQuery, FSInputFile, Message
 
 from config import BOT_TOKEN, SEARCH_RADIUS_KM, VACANCY_NOTIFY_INTERVAL_SECONDS
 from db import (
@@ -35,6 +36,7 @@ from keyboards import (
     city_keyboard,
     consent_keyboard,
     location_keyboard,
+    main_menu_keyboard,
     phone_keyboard,
     region_keyboard,
     respond_keyboard,
@@ -46,6 +48,7 @@ from vacancy_api import append_sheet_row, get_vacancies
 
 dp = Dispatcher()
 VACANCY_NOTIFY_SOURCE = "telegram_vacancy_api"
+CONSENT_DOC_PATH = Path(__file__).with_name("personal_data_consent_merch_bot.docx")
 CONSENT_TEXT = (
     "Даю согласие на обработку моих персональных данных: города, ФИО и телефона "
     "для подбора вакансий, связи со мной и фиксации откликов."
@@ -104,10 +107,17 @@ async def send_registration_intro(message: Message) -> None:
         "👤 ФИО\n"
         "📞 телефон для связи",
     )
+    if CONSENT_DOC_PATH.exists():
+        await message.answer_document(
+            FSInputFile(CONSENT_DOC_PATH),
+            caption="📎 Документ по обработке персональных данных.",
+        )
     await message.answer(
         "📄 <b>Согласие на обработку персональных данных</b>\n\n"
-        f"{escape_text(CONSENT_TEXT)}\n\n"
-        "Если согласны, нажмите кнопку ниже.",
+        "Пожалуйста, ознакомьтесь с документом выше.\n\n"
+        "Нажимая «✅ Согласен», вы подтверждаете, что прочитали документ, "
+        "понимаете цели обработки и даёте согласие на обработку ваших персональных данных: "
+        "города, ФИО и телефона для подбора вакансий, связи с вами и фиксации откликов.",
         reply_markup=consent_keyboard(),
     )
 
@@ -407,7 +417,7 @@ async def persist_response(message: Message, state: FSMContext, phone: str) -> N
         f"✅ Спасибо! Ваш отклик на вакансию <b>{title}</b> сохранен.\n"
         "📞 С вами в ближайшее время свяжется специалист отдела подбора, "
         "ожидайте звонка.",
-        reply_markup=ReplyKeyboardRemove(),
+        reply_markup=main_menu_keyboard(),
     )
     await state.clear()
 
@@ -433,7 +443,7 @@ async def persist_response_with_profile(
     await callback.message.answer(
         f"✅ Отклик на вакансию <b>{escape_text(vacancy['title'])}</b> сохранен.\n"
         "📞 С вами в ближайшее время свяжется специалист отдела подбора, ожидайте звонка.",
-        reply_markup=location_keyboard(),
+        reply_markup=main_menu_keyboard(),
     )
 
 
@@ -450,7 +460,7 @@ async def start_handler(message: Message, state: FSMContext) -> None:
         f"💼 Я найду вакансии рядом с вами в радиусе {SEARCH_RADIUS_KM} км.\n"
         "📍 Для быстрого поиска отправьте геопозицию.\n"
         "🏙 Для просмотра по региону и городу откройте каталог.",
-        reply_markup=location_keyboard(),
+        reply_markup=main_menu_keyboard(),
     )
 
 
@@ -471,6 +481,32 @@ async def catalog_command_handler(message: Message, state: FSMContext) -> None:
     await show_regions(message, state)
 
 
+@dp.callback_query(F.data == "main:geo")
+async def main_geo_callback(callback: CallbackQuery) -> None:
+    await callback.message.answer(
+        "📍 Нажмите кнопку ниже, чтобы отправить геопозицию.",
+        reply_markup=location_keyboard(),
+    )
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "main:catalog")
+async def main_catalog_callback(callback: CallbackQuery, state: FSMContext) -> None:
+    await show_regions(callback, state)
+
+
+@dp.callback_query(F.data == "main:my_data")
+async def main_my_data_callback(callback: CallbackQuery) -> None:
+    profile = get_telegram_profile(callback)
+    if not profile:
+        await send_registration_intro(callback.message)
+        await callback.answer()
+        return
+
+    await callback.message.answer(format_profile(profile), reply_markup=main_menu_keyboard())
+    await callback.answer()
+
+
 @dp.message(F.text == CATALOG_BUTTON_TEXT)
 async def catalog_button_handler(message: Message, state: FSMContext) -> None:
     await show_regions(message, state)
@@ -483,7 +519,7 @@ async def my_data_button_handler(message: Message, state: FSMContext) -> None:
         await send_registration_intro(message)
         return
 
-    await message.answer(format_profile(profile), reply_markup=location_keyboard())
+    await message.answer(format_profile(profile), reply_markup=main_menu_keyboard())
 
 
 @dp.callback_query(F.data == "profile:consent")
@@ -498,7 +534,7 @@ async def profile_consent_callback(callback: CallbackQuery, state: FSMContext) -
 async def profile_later_callback(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.message.answer(
         "Хорошо, можно заполнить данные позже через кнопку «Мои данные».",
-        reply_markup=location_keyboard(),
+        reply_markup=main_menu_keyboard(),
     )
     await callback.answer()
 
@@ -680,7 +716,7 @@ async def complete_profile(message: Message, state: FSMContext, phone: str) -> N
     await state.clear()
     await message.answer(
         "✅ Спасибо, данные сохранены.\n\n" + format_profile(profile),
-        reply_markup=location_keyboard(),
+        reply_markup=main_menu_keyboard(),
     )
 
     if pending_vacancy_id:
