@@ -24,7 +24,7 @@ def get_int_env(name: str, default: int) -> int:
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 MAX_BOT_TOKEN = os.getenv("MAX_BOT_TOKEN")
-SHEETDB_API_URL = os.getenv("SHEETDB_API_URL", "https://sheetdb.io/api/v1/gydose9dofxsj")
+SHEETDB_API_URL = os.getenv("SHEETDB_API_URL", "https://sheetdb.io/api/v1/1hy1px2yn59g7")
 SHEETDB_RESPONSES_API_URL = os.getenv("SHEETDB_RESPONSES_API_URL", SHEETDB_API_URL)
 SHEETDB_RESPONSES_SHEET_NAME = os.getenv("SHEETDB_RESPONSES_SHEET_NAME", "отклик")
 SEARCH_RADIUS_KM = get_int_env("SEARCH_RADIUS_KM", 10)

@@ -8,6 +8,7 @@ from typing import Optional
 from aiogram import Bot, Dispatcher, F
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
+from aiogram.exceptions import TelegramNetworkError
 from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, FSInputFile, Message
@@ -888,7 +889,15 @@ async def main() -> None:
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
     asyncio.create_task(vacancy_notification_loop(bot))
-    await dp.start_polling(bot)
+
+    while True:
+        try:
+            await dp.start_polling(bot, close_bot_session=False)
+        except TelegramNetworkError as exc:
+            print("TELEGRAM POLLING NETWORK ERROR:", exc, flush=True)
+            await asyncio.sleep(15)
+        else:
+            break
 
 
 if __name__ == "__main__":
